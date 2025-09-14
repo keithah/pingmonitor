@@ -85,11 +85,20 @@ enum PingStatus {
     }
 }
 
-struct Host: Identifiable {
-    let id = UUID()
-    let name: String
-    let address: String
+struct Host: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var address: String
     var isActive: Bool = false
+    var isDefault: Bool = false
+
+    init(name: String, address: String, isActive: Bool = false, isDefault: Bool = false) {
+        self.id = UUID()
+        self.name = name
+        self.address = address
+        self.isActive = isActive
+        self.isDefault = isDefault
+    }
 }
 
 // MARK: - Ping Service
@@ -98,6 +107,7 @@ class PingService: ObservableObject {
     @Published var latestResult: PingResult?
     @Published var pingHistory: [PingResult] = []
     @Published var currentHost: Host?
+    @Published var hosts: [Host] = []
     private var timers: [String: Timer] = [:]
 
     func startPingingAllHosts(_ hosts: [Host]) {
@@ -192,11 +202,8 @@ class PingService: ObservableObject {
 struct ContentView: View {
     @ObservedObject var pingService: PingService
     @State private var selectedHostIndex = 0
-    @State private var hosts = [
-        Host(name: "Google", address: "8.8.8.8", isActive: true),
-        Host(name: "Cloudflare", address: "1.1.1.1", isActive: false),
-        Host(name: "Default Gateway", address: getDefaultGateway(), isActive: false)
-    ]
+    @State private var showingSettings = false
+    @State private var showingExport = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -212,10 +219,19 @@ struct ContentView: View {
         .onAppear {
             updateActiveHost(selectedHostIndex)
         }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(pingService: pingService)
+                .frame(width: 500, height: 600)
+        }
+        .sheet(isPresented: $showingExport) {
+            ExportView(pingService: pingService)
+                .frame(width: 400, height: 300)
+        }
     }
 
     private var filteredHistory: [PingResult] {
-        let currentHostAddress = hosts[selectedHostIndex].address
+        guard selectedHostIndex < pingService.hosts.count else { return [] }
+        let currentHostAddress = pingService.hosts[selectedHostIndex].address
         return pingService.pingHistory.filter { $0.host == currentHostAddress }
     }
 
@@ -233,16 +249,16 @@ struct ContentView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(Array(hosts.enumerated()), id: \.element.id) { index, host in
+                    ForEach(Array(pingService.hosts.enumerated()), id: \.element.id) { index, host in
                         hostTab(for: host, index: index)
                     }
 
                     Menu {
                         Button("Settings") {
-                            print("Settings clicked")
+                            showingSettings = true
                         }
                         Button("Export Data") {
-                            print("Export clicked")
+                            showingExport = true
                         }
                         Divider()
                         Button("Quit") {
@@ -387,11 +403,13 @@ struct ContentView: View {
     }
 
     private func updateActiveHost(_ index: Int) {
-        for i in hosts.indices {
-            hosts[i].isActive = (i == index)
+        guard index < pingService.hosts.count else { return }
+
+        for i in pingService.hosts.indices {
+            pingService.hosts[i].isActive = (i == index)
         }
 
-        let selectedHost = hosts[index]
+        let selectedHost = pingService.hosts[index]
         pingService.currentHost = selectedHost
 
         if let recentResult = pingService.pingHistory.first(where: { $0.host == selectedHost.address }) {
@@ -559,6 +577,564 @@ struct GraphView: View {
     }
 }
 
+// MARK: - Settings View
+
+struct SettingsView: View {
+    @ObservedObject var pingService: PingService
+    @Environment(\.presentationMode) var presentationMode
+    @State private var showingAddHost = false
+    @State private var editingHost: Host?
+    @State private var newHostName = ""
+    @State private var newHostAddress = ""
+    @State private var errorMessage = ""
+    @State private var showError = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            headerSection
+
+            hostListSection
+
+            Spacer()
+
+            bottomButtons
+        }
+        .padding(20)
+        .background(Color(NSColor.windowBackgroundColor))
+        .alert("Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
+        .sheet(isPresented: $showingAddHost) {
+            addHostSheet
+        }
+        .sheet(item: $editingHost) { host in
+            editHostSheet(host: host)
+        }
+    }
+
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("PingMonitor Settings")
+                    .font(.title)
+                    .fontWeight(.bold)
+                Spacer()
+                Button("Done") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            Text("Manage hosts for network monitoring")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private var hostListSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Monitored Hosts")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button(action: { showingAddHost = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                        Text("Add Host")
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if pingService.hosts.isEmpty {
+                emptyHostsView
+            } else {
+                hostsList
+            }
+        }
+    }
+
+    private var emptyHostsView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "network")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+            Text("No hosts configured")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            Text("Add hosts to start monitoring network connectivity")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: 200)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(NSColor.controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+
+    private var hostsList: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                ForEach(pingService.hosts) { host in
+                    hostRow(host: host)
+                }
+            }
+        }
+        .frame(height: 300)
+    }
+
+    private func hostRow(host: Host) -> some View {
+        HStack(spacing: 16) {
+            Circle()
+                .fill(getHostStatusColor(host: host))
+                .frame(width: 12, height: 12)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(host.name)
+                        .font(.system(size: 15, weight: .semibold))
+                    if host.isActive {
+                        Text("ACTIVE")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.2))
+                            .foregroundColor(.green)
+                            .cornerRadius(4)
+                    }
+                }
+                Text(host.address)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Button("Edit") {
+                    editingHost = host
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button("Remove") {
+                    removeHost(host)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .foregroundColor(.red)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(NSColor.controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+
+    private var bottomButtons: some View {
+        HStack {
+            Button("Reset to Defaults") {
+                resetToDefaults()
+            }
+            .buttonStyle(.bordered)
+
+            Spacer()
+
+            Button("Cancel") {
+                presentationMode.wrappedValue.dismiss()
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var addHostSheet: some View {
+        VStack(spacing: 20) {
+            Text("Add New Host")
+                .font(.headline)
+                .fontWeight(.semibold)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Host Name")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                TextField("e.g., My Server", text: $newHostName)
+                    .textFieldStyle(.roundedBorder)
+
+                Text("IP Address or Hostname")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                TextField("e.g., 192.168.1.1 or example.com", text: $newHostAddress)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    resetAddHostForm()
+                    showingAddHost = false
+                }
+                .buttonStyle(.bordered)
+
+                Button("Add Host") {
+                    addNewHost()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(newHostName.isEmpty || newHostAddress.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 400, height: 250)
+    }
+
+    private func editHostSheet(host: Host) -> some View {
+        VStack(spacing: 20) {
+            Text("Edit Host")
+                .font(.headline)
+                .fontWeight(.semibold)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Host Name")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                TextField("Host name", text: .init(
+                    get: { newHostName.isEmpty ? host.name : newHostName },
+                    set: { newHostName = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+
+                Text("IP Address or Hostname")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                TextField("IP address", text: .init(
+                    get: { newHostAddress.isEmpty ? host.address : newHostAddress },
+                    set: { newHostAddress = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+            }
+
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    resetAddHostForm()
+                    editingHost = nil
+                }
+                .buttonStyle(.bordered)
+
+                Button("Save Changes") {
+                    saveHostChanges(host)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(width: 400, height: 250)
+        .onAppear {
+            newHostName = host.name
+            newHostAddress = host.address
+        }
+    }
+
+    private func addNewHost() {
+        guard !newHostName.isEmpty, !newHostAddress.isEmpty else {
+            errorMessage = "Please fill in all fields"
+            showError = true
+            return
+        }
+
+        // Check for duplicate addresses
+        if pingService.hosts.contains(where: { $0.address == newHostAddress }) {
+            errorMessage = "A host with this address already exists"
+            showError = true
+            return
+        }
+
+        let newHost = Host(name: newHostName, address: newHostAddress, isActive: false, isDefault: false)
+        pingService.hosts.append(newHost)
+        pingService.startPinging(host: newHost)
+
+        resetAddHostForm()
+        showingAddHost = false
+    }
+
+    private func saveHostChanges(_ host: Host) {
+        guard let index = pingService.hosts.firstIndex(where: { $0.id == host.id }) else { return }
+
+        let updatedName = newHostName.isEmpty ? host.name : newHostName
+        let updatedAddress = newHostAddress.isEmpty ? host.address : newHostAddress
+
+        // Check for duplicate addresses (excluding the current host)
+        if updatedAddress != host.address && pingService.hosts.contains(where: { $0.address == updatedAddress && $0.id != host.id }) {
+            errorMessage = "A host with this address already exists"
+            showError = true
+            return
+        }
+
+        pingService.hosts[index].name = updatedName
+        pingService.hosts[index].address = updatedAddress
+
+        resetAddHostForm()
+        editingHost = nil
+    }
+
+    private func removeHost(_ host: Host) {
+        pingService.hosts.removeAll { $0.id == host.id }
+    }
+
+    private func resetToDefaults() {
+        pingService.hosts = [
+            Host(name: "Google", address: "8.8.8.8", isActive: true, isDefault: true),
+            Host(name: "Cloudflare", address: "1.1.1.1", isActive: false, isDefault: true),
+            Host(name: "Default Gateway", address: getDefaultGateway(), isActive: false, isDefault: true)
+        ]
+        pingService.startPingingAllHosts(pingService.hosts)
+    }
+
+    private func resetAddHostForm() {
+        newHostName = ""
+        newHostAddress = ""
+    }
+
+    private func getHostStatusColor(host: Host) -> Color {
+        if let result = pingService.pingHistory.first(where: { $0.host == host.address }) {
+            return result.status.swiftUIColor
+        }
+        return .gray
+    }
+}
+
+// MARK: - Export View
+
+struct ExportView: View {
+    @ObservedObject var pingService: PingService
+    @Environment(\.presentationMode) var presentationMode
+    @State private var selectedFormat = ExportFormat.csv
+    @State private var selectedTimeRange = TimeRange.lastHour
+    @State private var includeAllHosts = true
+    @State private var selectedHost = 0
+    @State private var showingFilePicker = false
+    @State private var exportMessage = ""
+    @State private var showExportResult = false
+
+    enum ExportFormat: String, CaseIterable {
+        case csv = "CSV"
+        case json = "JSON"
+        case txt = "Text"
+    }
+
+    enum TimeRange: String, CaseIterable {
+        case lastHour = "Last Hour"
+        case last24Hours = "Last 24 Hours"
+        case lastWeek = "Last Week"
+        case all = "All Time"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Export Data")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    Spacer()
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Text("Export ping monitoring data")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Format")
+                        .font(.headline)
+                        .fontWeight(.medium)
+
+                    Picker("Format", selection: $selectedFormat) {
+                        ForEach(ExportFormat.allCases, id: \.self) { format in
+                            Text(format.rawValue).tag(format)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Time Range")
+                        .font(.headline)
+                        .fontWeight(.medium)
+
+                    Picker("Time Range", selection: $selectedTimeRange) {
+                        ForEach(TimeRange.allCases, id: \.self) { range in
+                            Text(range.rawValue).tag(range)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Hosts")
+                        .font(.headline)
+                        .fontWeight(.medium)
+
+                    Toggle("Include all hosts", isOn: $includeAllHosts)
+
+                    if !includeAllHosts && !pingService.hosts.isEmpty {
+                        Picker("Select Host", selection: $selectedHost) {
+                            ForEach(Array(pingService.hosts.enumerated()), id: \.element.id) { index, host in
+                                Text("\(host.name) (\(host.address))").tag(index)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+            }
+
+            Spacer()
+
+            HStack {
+                Text("\(filteredResults.count) records will be exported")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Button("Export") {
+                    exportData()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(filteredResults.isEmpty)
+            }
+        }
+        .padding(20)
+        .alert("Export Result", isPresented: $showExportResult) {
+            Button("OK") {
+                if exportMessage.contains("successfully") {
+                    presentationMode.wrappedValue.dismiss()
+                }
+            }
+        } message: {
+            Text(exportMessage)
+        }
+    }
+
+    private var filteredResults: [PingResult] {
+        var results = pingService.pingHistory
+
+        // Filter by time range
+        let cutoffDate: Date
+        switch selectedTimeRange {
+        case .lastHour:
+            cutoffDate = Calendar.current.date(byAdding: .hour, value: -1, to: Date()) ?? Date()
+        case .last24Hours:
+            cutoffDate = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+        case .lastWeek:
+            cutoffDate = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: Date()) ?? Date()
+        case .all:
+            cutoffDate = Date.distantPast
+        }
+
+        results = results.filter { $0.timestamp >= cutoffDate }
+
+        // Filter by host if needed
+        if !includeAllHosts && selectedHost < pingService.hosts.count {
+            let hostAddress = pingService.hosts[selectedHost].address
+            results = results.filter { $0.host == hostAddress }
+        }
+
+        return results.reversed() // Chronological order for export
+    }
+
+    private func exportData() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.init(filenameExtension: selectedFormat.rawValue.lowercased())!]
+        panel.nameFieldStringValue = "pingmonitor_export_\(Date().timeIntervalSince1970).\(selectedFormat.rawValue.lowercased())"
+
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else {
+                exportMessage = "Export cancelled"
+                showExportResult = true
+                return
+            }
+
+            do {
+                let content = generateExportContent()
+                try content.write(to: url, atomically: true, encoding: .utf8)
+                exportMessage = "Data exported successfully to \(url.lastPathComponent)"
+                showExportResult = true
+            } catch {
+                exportMessage = "Failed to export data: \(error.localizedDescription)"
+                showExportResult = true
+            }
+        }
+    }
+
+    private func generateExportContent() -> String {
+        let results = filteredResults
+
+        switch selectedFormat {
+        case .csv:
+            var content = "Timestamp,Host,Ping Time (ms),Status\n"
+            for result in results {
+                let timestamp = ISO8601DateFormatter().string(from: result.timestamp)
+                let pingTime = result.pingTime?.description ?? "--"
+                let status = result.status == .good ? "Good" : result.status == .warning ? "Slow" : result.status == .error ? "High" : "Down"
+                content += "\(timestamp),\(result.host),\(pingTime),\(status)\n"
+            }
+            return content
+
+        case .json:
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = .prettyPrinted
+
+            let exportData = results.map { result in
+                [
+                    "timestamp": ISO8601DateFormatter().string(from: result.timestamp),
+                    "host": result.host,
+                    "pingTime": result.pingTime?.description ?? "null",
+                    "status": result.status == .good ? "good" : result.status == .warning ? "warning" : result.status == .error ? "error" : "timeout"
+                ]
+            }
+
+            if let jsonData = try? JSONSerialization.data(withJSONObject: exportData, options: .prettyPrinted),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                return jsonString
+            }
+            return "[]"
+
+        case .txt:
+            var content = "PingMonitor Export\n"
+            content += "Generated: \(Date())\n"
+            content += "Time Range: \(selectedTimeRange.rawValue)\n"
+            content += "Total Records: \(results.count)\n\n"
+
+            for result in results {
+                let timestamp = DateFormatter.localizedString(from: result.timestamp, dateStyle: .medium, timeStyle: .medium)
+                let pingTime = result.pingTime.map { String(format: "%.1f ms", $0) } ?? "--"
+                let status = result.status == .good ? "Good" : result.status == .warning ? "Slow" : result.status == .error ? "High" : "Down"
+                content += "[\(timestamp)] \(result.host): \(pingTime) (\(status))\n"
+            }
+
+            return content
+        }
+    }
+}
+
 // MARK: - History Row
 
 struct HistoryRow: View {
@@ -657,12 +1233,12 @@ class MenuBarController: ObservableObject {
     }
 
     private func startMonitoring() {
-        let allHosts = [
-            Host(name: "Google", address: "8.8.8.8", isActive: true),
-            Host(name: "Cloudflare", address: "1.1.1.1", isActive: false),
-            Host(name: "Default Gateway", address: getDefaultGateway(), isActive: false)
+        pingService.hosts = [
+            Host(name: "Google", address: "8.8.8.8", isActive: true, isDefault: true),
+            Host(name: "Cloudflare", address: "1.1.1.1", isActive: false, isDefault: true),
+            Host(name: "Default Gateway", address: getDefaultGateway(), isActive: false, isDefault: true)
         ]
-        pingService.startPingingAllHosts(allHosts)
+        pingService.startPingingAllHosts(pingService.hosts)
     }
 
     private func createStatusImage(color: NSColor, pingText: String) -> NSImage {
@@ -718,7 +1294,7 @@ class MenuBarController: ObservableObject {
     @objc private func handleClick() {
         guard let event = NSApp.currentEvent else { return }
 
-        if event.type == .rightMouseUp {
+        if event.type == .rightMouseUp || event.modifierFlags.contains(.control) || event.modifierFlags.contains(.command) {
             showRightClickMenu()
         } else {
             togglePopover()
@@ -802,11 +1378,35 @@ class MenuBarController: ObservableObject {
     }
 
     @objc private func showSettings() {
-        print("Settings from right-click")
+        let settingsWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        settingsWindow.title = "PingMonitor Settings"
+        settingsWindow.contentViewController = NSHostingController(
+            rootView: SettingsView(pingService: pingService)
+        )
+        settingsWindow.center()
+        settingsWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func showExport() {
-        print("Export from right-click")
+        let exportWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        exportWindow.title = "Export Data"
+        exportWindow.contentViewController = NSHostingController(
+            rootView: ExportView(pingService: pingService)
+        )
+        exportWindow.center()
+        exportWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func quitApp() {
