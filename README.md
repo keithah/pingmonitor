@@ -2,7 +2,11 @@
 
 A professional macOS menu bar application for real-time network monitoring with beautiful graphs and detailed ping history.
 
-![PingMonitor Screenshot](screenshot.png)
+## Screenshot
+
+![PingMonitor Interface](screenshot.png)
+
+*PingMonitor's main interface showing real-time ping monitoring with beautiful graphs, host tabs, detailed history, and the Settings/Export dropdown menu. The app displays current network status with color-coded indicators and provides comprehensive monitoring tools in a native macOS design.*
 
 ## Features
 
