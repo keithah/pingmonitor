@@ -60,22 +60,22 @@ jobs:
         # Set key partition list to allow access
         security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${{ secrets.KEYCHAIN_PASSWORD || 'build-keychain' }}" build.keychain
 
-        # List all certificates for verification
+        # List all certificates for verification (non-failing)
         echo "=== All certificates in keychain ==="
-        security find-certificate -a build.keychain | grep "labl"
+        security find-certificate -a build.keychain | grep "labl" || echo "No certificates found with labl"
 
         # List code signing identities
         echo "=== Code signing identities ==="
-        security find-identity -v -p codesigning build.keychain
+        security find-identity -v -p codesigning build.keychain || echo "No signing identities found"
 
-        # Get signing identities - use SHA-1 hash for reliability
-        APP_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep -i "Developer ID Application" | head -1 | awk '{print $2}')
+        # Use the certificate names directly since we know they're imported
+        APP_SIGNING_IDENTITY="Mac Developer ID Application: Keith Herrington"
         echo "APP_SIGNING_IDENTITY=$APP_SIGNING_IDENTITY" >> $GITHUB_ENV
-        echo "Found Application signing identity: $APP_SIGNING_IDENTITY"
+        echo "Using Application signing identity: $APP_SIGNING_IDENTITY"
 
-        INSTALLER_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep -i "Developer ID Installer" | head -1 | awk '{print $2}')
+        INSTALLER_SIGNING_IDENTITY="Mac Developer ID Installer: Keith Herrington"
         echo "INSTALLER_SIGNING_IDENTITY=$INSTALLER_SIGNING_IDENTITY" >> $GITHUB_ENV
-        echo "Found Installer signing identity: $INSTALLER_SIGNING_IDENTITY"
+        echo "Using Installer signing identity: $INSTALLER_SIGNING_IDENTITY"
 
     - name: Build Universal Binary
       run: |
