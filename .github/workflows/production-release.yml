@@ -55,6 +55,12 @@ jobs:
         echo "Importing Installer certificate..."
         security import installer_certificate.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -A
 
+        # Import Apple intermediate certificates for trust chain
+        curl -f -s -o DeveloperIDG2CA.cer "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer"
+        curl -f -s -o AppleRoot.cer "https://www.apple.com/certificateauthority/AppleRootCA.cer"
+        security import DeveloperIDG2CA.cer -k build.keychain -T /usr/bin/codesign
+        security import AppleRoot.cer -k build.keychain -T /usr/bin/codesign
+
         # Set key partition list to allow codesign access
         security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "build-keychain-pass" build.keychain
 
