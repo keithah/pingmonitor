@@ -58,9 +58,9 @@ jobs:
         # Find the imported certificate identity
         security find-identity -v build.keychain
 
-        # Set signing identity (the format we know works from import logs)
-        echo "SIGNING_IDENTITY=Developer ID Application: Keith Herrington (6R7S5GA944)" >> $GITHUB_ENV
-        echo "INSTALLER_IDENTITY=Developer ID Installer: Keith Herrington (6R7S5GA944)" >> $GITHUB_ENV
+        # Set signing identity using the names that were successfully imported
+        echo "SIGNING_IDENTITY=Mac Developer ID Application: Keith Herrington" >> $GITHUB_ENV
+        echo "INSTALLER_IDENTITY=Mac Developer ID Installer: Keith Herrington" >> $GITHUB_ENV
 
     - name: Build Universal Binary
       run: |
