@@ -56,15 +56,14 @@ jobs:
         echo "=== Available identities ==="
         security find-identity -v -p codesigning $KEYCHAIN_PATH
 
-        APP_IDENTITY=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "Developer ID Application" | head -1 | cut -d '"' -f 2)
-        INSTALLER_IDENTITY=$(security find-identity -v -p codesigning $KEYCHAIN_PATH | grep "Developer ID Installer" | head -1 | cut -d '"' -f 2)
-
-        echo "APP_IDENTITY=$APP_IDENTITY" >> $GITHUB_ENV
-        echo "INSTALLER_IDENTITY=$INSTALLER_IDENTITY" >> $GITHUB_ENV
+        # Use SHA-1 hashes directly as we know them from our debugging
+        echo "APP_IDENTITY=AFA28ED237DAFF049E872C803CE219300FC444C9" >> $GITHUB_ENV
+        echo "INSTALLER_IDENTITY=A59492B7106E24BAF5B1B42DCEB45FCEF1B959DE" >> $GITHUB_ENV
         echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
 
-        echo "Found app identity: $APP_IDENTITY"
-        echo "Found installer identity: $INSTALLER_IDENTITY"
+        echo "Using hardcoded SHA-1 identities from previous debugging"
+        echo "App identity: AFA28ED237DAFF049E872C803CE219300FC444C9"
+        echo "Installer identity: A59492B7106E24BAF5B1B42DCEB45FCEF1B959DE"
 
     - name: Build Universal Binary
       run: |
