@@ -60,8 +60,16 @@ jobs:
         # Set key partition list
         security set-key-partition-list -S apple-tool:,apple: -s -k "${{ secrets.KEYCHAIN_PASSWORD || 'build-keychain' }}" build.keychain
 
-        # List certificates for verification
+        # List certificates for verification and get signing identity
         security find-identity -v -p codesigning build.keychain
+
+        # Get the application signing identity
+        APP_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
+        echo "APP_SIGNING_IDENTITY=$APP_SIGNING_IDENTITY" >> $GITHUB_ENV
+
+        # Get the installer signing identity
+        INSTALLER_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Installer" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
+        echo "INSTALLER_SIGNING_IDENTITY=$INSTALLER_SIGNING_IDENTITY" >> $GITHUB_ENV
 
     - name: Build Universal Binary
       run: |
@@ -151,8 +159,9 @@ jobs:
 
     - name: Sign application
       run: |
+        echo "Signing with identity: $APP_SIGNING_IDENTITY"
         codesign --deep --force --verify --verbose \
-          --sign "Developer ID Application: Keith Herrington (${{ secrets.APPLE_TEAM_ID }})" \
+          --sign "$APP_SIGNING_IDENTITY" \
           --entitlements entitlements.plist \
           --options runtime \
           "$PRODUCT_NAME.app"
@@ -192,7 +201,8 @@ jobs:
 
     - name: Sign PKG
       run: |
-        productsign --sign "Developer ID Installer: Keith Herrington (${{ secrets.APPLE_TEAM_ID }})" \
+        echo "Signing PKG with identity: $INSTALLER_SIGNING_IDENTITY"
+        productsign --sign "$INSTALLER_SIGNING_IDENTITY" \
           "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg" \
           "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.pkg"
         mv "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.pkg" \
