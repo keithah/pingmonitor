@@ -128,9 +128,9 @@ jobs:
           exit 1
         fi
 
+        # Try signing without entitlements first to see if basic signing works
         codesign --deep --force --verify --verbose \
           --sign "$APP_IDENTITY" \
-          --entitlements $RUNNER_TEMP/entitlements.plist \
           --options runtime \
           "$PRODUCT_NAME.app"
 
