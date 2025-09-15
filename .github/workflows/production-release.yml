@@ -64,12 +64,14 @@ jobs:
         security find-identity -v -p codesigning build.keychain
 
         # Get the application signing identity
-        APP_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
+        APP_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep -E "(Mac |)Developer ID Application" | head -1 | sed 's/.*) "\([^"]*\)".*/\1/')
         echo "APP_SIGNING_IDENTITY=$APP_SIGNING_IDENTITY" >> $GITHUB_ENV
+        echo "Found Application signing identity: $APP_SIGNING_IDENTITY"
 
         # Get the installer signing identity
-        INSTALLER_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Installer" | head -1 | sed 's/[^"]*"\([^"]*\)".*/\1/')
+        INSTALLER_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep -E "(Mac |)Developer ID Installer" | head -1 | sed 's/.*) "\([^"]*\)".*/\1/')
         echo "INSTALLER_SIGNING_IDENTITY=$INSTALLER_SIGNING_IDENTITY" >> $GITHUB_ENV
+        echo "Found Installer signing identity: $INSTALLER_SIGNING_IDENTITY"
 
     - name: Build Universal Binary
       run: |
