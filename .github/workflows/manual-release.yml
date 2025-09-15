@@ -47,8 +47,33 @@ jobs:
 
         security find-identity -v build.keychain
 
-        echo "SIGNING_IDENTITY=Mac Developer ID Application: Keith Herrington" >> $GITHUB_ENV
-        echo "INSTALLER_IDENTITY=Mac Developer ID Installer: Keith Herrington" >> $GITHUB_ENV
+        # List all certificates for debugging
+        echo "=== All certificates in keychain ==="
+        security find-certificate -a build.keychain | grep "labl" || echo "No certificates found with labl"
+
+        # List all identities (valid and invalid)
+        echo "=== All identities ==="
+        security find-identity build.keychain || echo "No identities found"
+
+        # Try to find the exact signing identity
+        SIGNING_ID=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | cut -d '"' -f 2 || echo "")
+        INSTALLER_ID=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Installer" | head -1 | cut -d '"' -f 2 || echo "")
+
+        echo "Found signing identity: $SIGNING_ID"
+        echo "Found installer identity: $INSTALLER_ID"
+
+        if [ -z "$SIGNING_ID" ]; then
+          echo "❌ No signing identity found! Using fallback..."
+          SIGNING_ID="Mac Developer ID Application: Keith Herrington"
+        fi
+
+        if [ -z "$INSTALLER_ID" ]; then
+          echo "❌ No installer identity found! Using fallback..."
+          INSTALLER_ID="Mac Developer ID Installer: Keith Herrington"
+        fi
+
+        echo "SIGNING_IDENTITY=$SIGNING_ID" >> $GITHUB_ENV
+        echo "INSTALLER_IDENTITY=$INSTALLER_ID" >> $GITHUB_ENV
 
     - name: Build Universal Binary
       run: |
