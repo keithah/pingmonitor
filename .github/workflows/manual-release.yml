@@ -47,8 +47,8 @@ jobs:
 
         security find-identity -v build.keychain
 
-        echo "SIGNING_IDENTITY=Developer ID Application: Keith Herrington (6R7S5GA944)" >> $GITHUB_ENV
-        echo "INSTALLER_IDENTITY=Developer ID Installer: Keith Herrington (6R7S5GA944)" >> $GITHUB_ENV
+        echo "SIGNING_IDENTITY=Mac Developer ID Application: Keith Herrington" >> $GITHUB_ENV
+        echo "INSTALLER_IDENTITY=Mac Developer ID Installer: Keith Herrington" >> $GITHUB_ENV
 
     - name: Build Universal Binary
       run: |
