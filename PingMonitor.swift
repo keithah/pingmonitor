@@ -108,6 +108,7 @@ class PingService: ObservableObject {
     @Published var pingHistory: [PingResult] = []
     @Published var currentHost: Host?
     @Published var hosts: [Host] = []
+    @Published var hostLatestResults: [String: PingResult] = [:] // Track latest result per host
     private var timers: [String: Timer] = [:]
 
     func startPingingAllHosts(_ hosts: [Host]) {
@@ -169,6 +170,9 @@ class PingService: ObservableObject {
                         self.pingHistory.removeLast()
                     }
 
+                    // Store latest result for each host
+                    self.hostLatestResults[host.address] = result
+
                     if host.isActive || self.currentHost?.address == host.address {
                         self.latestResult = result
                     }
@@ -177,6 +181,9 @@ class PingService: ObservableObject {
                 DispatchQueue.main.async {
                     let result = PingResult(host: host.address, pingTime: nil, status: .error)
                     self.pingHistory.insert(result, at: 0)
+
+                    // Store latest result for each host
+                    self.hostLatestResults[host.address] = result
 
                     if host.isActive || self.currentHost?.address == host.address {
                         self.latestResult = result
@@ -199,11 +206,28 @@ class PingService: ObservableObject {
 
 // MARK: - SwiftUI Views
 
+enum TimeFilter: String, CaseIterable {
+    case oneMinute = "1 min"
+    case fiveMinutes = "5 min"
+    case tenMinutes = "10 min"
+    case oneHour = "1 hour"
+
+    var timeInterval: TimeInterval {
+        switch self {
+        case .oneMinute: return 60
+        case .fiveMinutes: return 300
+        case .tenMinutes: return 600
+        case .oneHour: return 3600
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var pingService: PingService
     @State private var selectedHostIndex = 0
     @State private var showingSettings = false
     @State private var showingExport = false
+    @State private var selectedTimeFilter: TimeFilter = .fiveMinutes
 
     var body: some View {
         VStack(spacing: 0) {
@@ -232,7 +256,10 @@ struct ContentView: View {
     private var filteredHistory: [PingResult] {
         guard selectedHostIndex < pingService.hosts.count else { return [] }
         let currentHostAddress = pingService.hosts[selectedHostIndex].address
-        return pingService.pingHistory.filter { $0.host == currentHostAddress }
+        let cutoffTime = Date().timeIntervalSince1970 - selectedTimeFilter.timeInterval
+        return pingService.pingHistory.filter {
+            $0.host == currentHostAddress && $0.timestamp.timeIntervalSince1970 >= cutoffTime
+        }
     }
 
     private var hostTabsSection: some View {
@@ -324,18 +351,34 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                HStack(spacing: 4) {
-                    Text("Last 30 results")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                Menu {
+                    ForEach(TimeFilter.allCases, id: \.self) { filter in
+                        Button(action: {
+                            selectedTimeFilter = filter
+                        }) {
+                            HStack {
+                                Text("Last \(filter.rawValue)")
+                                if selectedTimeFilter == filter {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Last \(selectedTimeFilter.rawValue)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
+                .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, 16)
 
-            GraphView(history: Array(filteredHistory.prefix(30)))
+            GraphView(history: filteredHistory)
                 .frame(height: 140)
                 .padding(.horizontal, 16)
         }
@@ -392,7 +435,7 @@ struct ContentView: View {
 
             ScrollView {
                 LazyVStack(spacing: 1) {
-                    ForEach(Array(filteredHistory.prefix(20))) { result in
+                    ForEach(filteredHistory) { result in
                         HistoryRow(result: result)
                     }
                 }
@@ -418,7 +461,7 @@ struct ContentView: View {
     }
 
     private func getHostStatusColor(host: Host) -> Color {
-        if host.isActive, let result = pingService.latestResult {
+        if let result = pingService.hostLatestResults[host.address] {
             return result.status.swiftUIColor
         }
         return .gray
