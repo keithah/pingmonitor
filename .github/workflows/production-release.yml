@@ -55,38 +55,24 @@ jobs:
         echo "Importing Installer certificate..."
         security import installer_certificate.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -A
 
-        # Import Apple intermediate certificates for trust chain
-        curl -f -s -o DeveloperIDG2CA.cer "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer"
-        curl -f -s -o AppleRoot.cer "https://www.apple.com/certificateauthority/AppleRootCA.cer"
-        security import DeveloperIDG2CA.cer -k build.keychain -T /usr/bin/codesign
-        security import AppleRoot.cer -k build.keychain -T /usr/bin/codesign
-
         # Set key partition list to allow codesign access
         security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "build-keychain-pass" build.keychain
 
         # List what we have
         echo "=== Code signing identities ==="
         security find-identity -v -p codesigning build.keychain
+        echo "=== All identities ==="
+        security find-identity -v build.keychain
 
-        # Get the actual signing identity from what was imported
-        SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | grep -o '"[^"]*"' | sed 's/"//g')
-        if [ -z "$SIGNING_IDENTITY" ]; then
-          echo "ERROR: No Developer ID Application certificate found!"
-          security find-identity -v build.keychain
-          exit 1
-        fi
+        # Use the SHA-1 hashes we know from previous successful imports
+        # These correspond to "Mac Developer ID Application: Keith Herrington" and "Mac Developer ID Installer: Keith Herrington"
+        APP_SIGNING_IDENTITY="AFA28ED237DAFF049E872C803CE219300FC444C9"
+        INSTALLER_SIGNING_IDENTITY="A59492B7106E24BAF5B1B42DCEB45FCEF1B959DE"
 
-        INSTALLER_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Installer" | head -1 | grep -o '"[^"]*"' | sed 's/"//g')
-        if [ -z "$INSTALLER_IDENTITY" ]; then
-          echo "ERROR: No Developer ID Installer certificate found!"
-          security find-identity -v build.keychain
-          exit 1
-        fi
-
-        echo "APP_SIGNING_IDENTITY=$SIGNING_IDENTITY" >> $GITHUB_ENV
-        echo "INSTALLER_SIGNING_IDENTITY=$INSTALLER_IDENTITY" >> $GITHUB_ENV
-        echo "✅ Found Application signing identity: $SIGNING_IDENTITY"
-        echo "✅ Found Installer signing identity: $INSTALLER_IDENTITY"
+        echo "APP_SIGNING_IDENTITY=$APP_SIGNING_IDENTITY" >> $GITHUB_ENV
+        echo "INSTALLER_SIGNING_IDENTITY=$INSTALLER_SIGNING_IDENTITY" >> $GITHUB_ENV
+        echo "✅ Using Application signing SHA-1: $APP_SIGNING_IDENTITY"
+        echo "✅ Using Installer signing SHA-1: $INSTALLER_SIGNING_IDENTITY"
 
     - name: Build Universal Binary
       run: |
