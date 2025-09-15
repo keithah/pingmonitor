@@ -9,7 +9,7 @@ on:
       version:
         description: 'Version number (e.g., 1.0.0)'
         required: true
-        default: '1.0.0'
+        default: '0.1.0'
 
 env:
   PRODUCT_NAME: "PingMonitor"
@@ -74,15 +74,14 @@ jobs:
         # List all identities (including invalid ones) to find our certificates
         security find-identity -v build.keychain || echo "No identities found"
 
-        # Extract SHA-1 hashes from the imported certificate data we saw earlier
-        # These are the actual SHA-1 hashes from the successful import
-        APP_SIGNING_IDENTITY="AFA28ED237DAFF049E872C803CE219300FC444C9"
+        # Use the certificate names that were successfully imported
+        APP_SIGNING_IDENTITY="Mac Developer ID Application: Keith Herrington"
         echo "APP_SIGNING_IDENTITY=$APP_SIGNING_IDENTITY" >> $GITHUB_ENV
-        echo "Using Application signing SHA-1: $APP_SIGNING_IDENTITY"
+        echo "Using Application signing identity: $APP_SIGNING_IDENTITY"
 
-        INSTALLER_SIGNING_IDENTITY="A59492B7106E24BAF5B1B42DCEB45FCEF1B959DE"
+        INSTALLER_SIGNING_IDENTITY="Mac Developer ID Installer: Keith Herrington"
         echo "INSTALLER_SIGNING_IDENTITY=$INSTALLER_SIGNING_IDENTITY" >> $GITHUB_ENV
-        echo "Using Installer signing SHA-1: $INSTALLER_SIGNING_IDENTITY"
+        echo "Using Installer signing identity: $INSTALLER_SIGNING_IDENTITY"
 
     - name: Build Universal Binary
       run: |
