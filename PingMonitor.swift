@@ -110,10 +110,46 @@ class PingService: ObservableObject {
     @Published var hosts: [Host] = []
     @Published var hostLatestResults: [String: PingResult] = [:] // Track latest result per host
     private var timers: [String: Timer] = [:]
+    private var gatewayRefreshTimer: Timer?
 
     func startPingingAllHosts(_ hosts: [Host]) {
         for host in hosts {
             startPinging(host: host)
+        }
+        startGatewayRefresh()
+    }
+
+    private func startGatewayRefresh() {
+        gatewayRefreshTimer?.invalidate()
+        gatewayRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
+            self.refreshDefaultGateway()
+        }
+    }
+
+    private func refreshDefaultGateway() {
+        let currentGateway = getDefaultGateway()
+
+        // Find the default gateway host
+        if let gatewayIndex = hosts.firstIndex(where: { $0.name == "Default Gateway" }) {
+            let oldGateway = hosts[gatewayIndex].address
+
+            // Only update if gateway has changed
+            if oldGateway != currentGateway {
+                print("Default gateway changed from \(oldGateway) to \(currentGateway)")
+
+                // Stop pinging the old gateway
+                timers[oldGateway]?.invalidate()
+                timers.removeValue(forKey: oldGateway)
+
+                // Update the host with new gateway address
+                hosts[gatewayIndex].address = currentGateway
+
+                // Start pinging the new gateway
+                startPinging(host: hosts[gatewayIndex])
+
+                // Clean up old ping history for the old gateway
+                hostLatestResults.removeValue(forKey: oldGateway)
+            }
         }
     }
 
@@ -134,6 +170,8 @@ class PingService: ObservableObject {
     func stopPinging() {
         timers.values.forEach { $0.invalidate() }
         timers.removeAll()
+        gatewayRefreshTimer?.invalidate()
+        gatewayRefreshTimer = nil
     }
 
     private func performPing(host: Host) {
