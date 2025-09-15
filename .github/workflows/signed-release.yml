@@ -9,7 +9,7 @@ on:
       version:
         description: 'Version number (e.g., 1.0.0)'
         required: true
-        default: '1.0.0'
+        default: '1.1.0'
 
 env:
   PRODUCT_NAME: "PingMonitor"
@@ -59,8 +59,8 @@ jobs:
         security find-identity -v build.keychain
 
         # Set signing identity (the format we know works from import logs)
-        echo "SIGNING_IDENTITY=Mac Developer ID Application: Keith Herrington" >> $GITHUB_ENV
-        echo "INSTALLER_IDENTITY=Mac Developer ID Installer: Keith Herrington" >> $GITHUB_ENV
+        echo "SIGNING_IDENTITY=Developer ID Application: Keith Herrington (6R7S5GA944)" >> $GITHUB_ENV
+        echo "INSTALLER_IDENTITY=Developer ID Installer: Keith Herrington (6R7S5GA944)" >> $GITHUB_ENV
 
     - name: Build Universal Binary
       run: |
