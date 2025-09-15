@@ -1,0 +1,192 @@
+name: Simple Build for Local Signing
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+        default: '1.3.0'
+
+env:
+  PRODUCT_NAME: "PingMonitor"
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build Universal Binary
+      run: |
+        swiftc PingMonitor.swift -o PingMonitor-arm64 -target arm64-apple-macos13.0 -Osize
+        swiftc PingMonitor.swift -o PingMonitor-x86_64 -target x86_64-apple-macos13.0 -Osize
+        lipo -create -output PingMonitor PingMonitor-arm64 PingMonitor-x86_64
+        lipo -archs PingMonitor
+        echo "✅ Universal binary created"
+
+    - name: Create App Bundle
+      run: |
+        mkdir -p "$PRODUCT_NAME.app/Contents/MacOS"
+        cp PingMonitor "$PRODUCT_NAME.app/Contents/MacOS/"
+
+        cat > "$PRODUCT_NAME.app/Contents/Info.plist" << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleExecutable</key>
+            <string>$PRODUCT_NAME</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.pingmonitor.app</string>
+            <key>CFBundleName</key>
+            <string>$PRODUCT_NAME</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${{ github.event.inputs.version }}</string>
+            <key>CFBundleVersion</key>
+            <string>${{ github.event.inputs.version }}</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>13.0</string>
+            <key>LSUIElement</key>
+            <true/>
+            <key>NSPrincipalClass</key>
+            <string>NSApplication</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>NSSupportsAutomaticGraphicsSwitching</key>
+            <true/>
+            <key>NSRequiresAquaSystemAppearance</key>
+            <false/>
+        </dict>
+        </plist>
+        EOF
+        echo "✅ App bundle created"
+
+    - name: Create Entitlements for Local Signing
+      run: |
+        cat > "entitlements.plist" << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>com.apple.security.app-sandbox</key>
+            <true/>
+            <key>com.apple.security.network.client</key>
+            <true/>
+            <key>com.apple.security.files.user-selected.read-write</key>
+            <true/>
+            <key>com.apple.security.cs.allow-jit</key>
+            <false/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+            <false/>
+            <key>com.apple.security.cs.disable-executable-page-protection</key>
+            <false/>
+        </dict>
+        </plist>
+        EOF
+
+    - name: Create DMG
+      run: |
+        mkdir dmg_staging
+        cp -R "$PRODUCT_NAME.app" dmg_staging/
+        ln -s /Applications dmg_staging/Applications
+        hdiutil create -volname "$PRODUCT_NAME v${{ github.event.inputs.version }} (Unsigned)" \
+          -srcfolder dmg_staging \
+          -ov -format UDZO \
+          "$PRODUCT_NAME-${{ github.event.inputs.version }}-unsigned.dmg"
+        echo "✅ DMG created"
+
+    - name: Create PKG
+      run: |
+        mkdir -p pkg_staging/Applications
+        cp -R "$PRODUCT_NAME.app" pkg_staging/Applications/
+        pkgbuild --root pkg_staging \
+          --identifier "com.pingmonitor.app.installer" \
+          --version "${{ github.event.inputs.version }}" \
+          --install-location "/" \
+          "$PRODUCT_NAME-${{ github.event.inputs.version }}-unsigned.pkg"
+        echo "✅ PKG created"
+
+    - name: Create Local Signing Instructions
+      run: |
+        cat > "SIGNING_INSTRUCTIONS.md" << EOF
+        # Local Signing Instructions
+
+        ## What's Included
+        - \`$PRODUCT_NAME.app\` - Unsigned app bundle ready for signing
+        - \`entitlements.plist\` - Entitlements file for sandboxed signing
+        - \`$PRODUCT_NAME-${{ github.event.inputs.version }}-unsigned.dmg\` - Unsigned DMG
+        - \`$PRODUCT_NAME-${{ github.event.inputs.version }}-unsigned.pkg\` - Unsigned PKG
+
+        ## Sign the App Bundle
+        \`\`\`bash
+        # Sign the app (this command worked in our testing)
+        codesign --deep --force --verify --verbose \\
+          --sign "Developer ID Application: Keith Herrington (6R7S5GA944)" \\
+          --entitlements entitlements.plist \\
+          --options runtime \\
+          "$PRODUCT_NAME.app"
+
+        # Verify signing
+        codesign --verify --verbose=2 "$PRODUCT_NAME.app"
+        spctl --assess --verbose=2 "$PRODUCT_NAME.app"
+        \`\`\`
+
+        ## Sign the PKG (if needed)
+        \`\`\`bash
+        # Re-create and sign PKG with signed app
+        rm -rf pkg_staging
+        mkdir -p pkg_staging/Applications
+        cp -R "$PRODUCT_NAME.app" pkg_staging/Applications/
+        pkgbuild --root pkg_staging \\
+          --identifier "com.pingmonitor.app.installer" \\
+          --version "${{ github.event.inputs.version }}" \\
+          --install-location "/" \\
+          "unsigned.pkg"
+
+        # Sign the PKG
+        productsign --sign "Developer ID Installer: Keith Herrington (6R7S5GA944)" \\
+          "unsigned.pkg" \\
+          "$PRODUCT_NAME-${{ github.event.inputs.version }}-signed.pkg"
+        \`\`\`
+
+        ## Create Signed DMG
+        \`\`\`bash
+        # Create new DMG with signed app
+        rm -rf dmg_staging
+        mkdir dmg_staging
+        cp -R "$PRODUCT_NAME.app" dmg_staging/
+        ln -s /Applications dmg_staging/Applications
+        hdiutil create -volname "$PRODUCT_NAME v${{ github.event.inputs.version }}" \\
+          -srcfolder dmg_staging \\
+          -ov -format UDZO \\
+          "$PRODUCT_NAME-${{ github.event.inputs.version }}-signed.dmg"
+        \`\`\`
+
+        ## Notarize (Optional)
+        \`\`\`bash
+        # Submit for notarization
+        xcrun notarytool submit "$PRODUCT_NAME-${{ github.event.inputs.version }}-signed.dmg" \\
+          --apple-id "your-apple-id@example.com" \\
+          --password "your-app-specific-password" \\
+          --team-id "6R7S5GA944" \\
+          --wait
+
+        # Staple notarization ticket
+        xcrun stapler staple "$PRODUCT_NAME-${{ github.event.inputs.version }}-signed.dmg"
+        \`\`\`
+        EOF
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: PingMonitor-v${{ github.event.inputs.version }}-ReadyToSign
+        path: |
+          PingMonitor.app
+          entitlements.plist
+          PingMonitor-${{ github.event.inputs.version }}-unsigned.dmg
+          PingMonitor-${{ github.event.inputs.version }}-unsigned.pkg
+          SIGNING_INSTRUCTIONS.md
