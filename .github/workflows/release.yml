@@ -113,7 +113,7 @@ jobs:
           -Osize
 
     - name: Import signing certificate (if available)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      if: secrets.APPLE_CERTIFICATE_P12
       run: |
         # Create keychain
         security create-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
@@ -130,7 +130,7 @@ jobs:
         security find-identity -v -p codesigning build.keychain
 
     - name: Sign application (if certificate available)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      if: secrets.APPLE_CERTIFICATE_P12
       run: |
         codesign --deep --force --verify --verbose \
           --sign "${{ secrets.DEVELOPER_ID_APPLICATION }}" \
@@ -139,7 +139,7 @@ jobs:
           "$PRODUCT_NAME.app"
 
     - name: Verify code signature (if signed)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      if: secrets.APPLE_CERTIFICATE_P12
       run: |
         codesign --verify --verbose=2 "$PRODUCT_NAME.app"
         spctl --assess --verbose=2 "$PRODUCT_NAME.app"
@@ -173,7 +173,7 @@ jobs:
           "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg"
 
     - name: Sign PKG (if certificate available)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      if: secrets.APPLE_CERTIFICATE_P12
       run: |
         productsign --sign "${{ secrets.DEVELOPER_ID_INSTALLER }}" \
           "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg" \
@@ -182,7 +182,7 @@ jobs:
            "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg"
 
     - name: Notarize DMG and PKG (if certificate available)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 && secrets.APPLE_ID && secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      if: secrets.APPLE_CERTIFICATE_P12 && secrets.APPLE_ID && secrets.APPLE_APP_SPECIFIC_PASSWORD
       run: |
         # Notarize DMG
         xcrun notarytool submit "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.dmg" \

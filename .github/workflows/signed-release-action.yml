@@ -152,7 +152,7 @@ jobs:
         mv unsigned.pkg "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.pkg"
 
     - name: Notarize (if credentials available)
-      if: ${{ secrets.APPLE_ID && secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      if: secrets.APPLE_ID && secrets.APPLE_APP_SPECIFIC_PASSWORD
       run: |
         echo "🔐 Starting notarization process..."
 
