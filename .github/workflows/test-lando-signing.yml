@@ -50,7 +50,7 @@ jobs:
     - name: Test Lando Code Sign
       uses: lando/code-sign-action@v2
       with:
-        file: ${{ env.PRODUCT_NAME }}.app
+        file: ./PingMonitor.app
         certificate-data: ${{ secrets.APPLE_CERTIFICATE_P12 }}
         certificate-password: ${{ secrets.CERTIFICATE_PASSWORD }}
         apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
