@@ -20,6 +20,7 @@ import Foundation
 import Combine
 import Network
 import SystemConfiguration
+import UserNotifications
 
 // MARK: - Utilities
 
@@ -120,6 +121,20 @@ struct PingSettings: Codable {
     var port: Int? = nil // for UDP/TCP pings
 }
 
+struct NotificationSettings: Codable {
+    var enabled: Bool = false
+    var onNoResponse: Bool = false // Alert when host doesn't respond
+    var onThreshold: Bool = false // Alert when ping exceeds threshold
+    var thresholdMs: Double = 2000.0
+    var onNetworkChange: Bool = false // Alert when gateway/network changes
+    var onRecovery: Bool = false // Alert when host recovers from failure
+    var onDegradation: Bool = false // Alert when performance degrades
+    var degradationPercent: Double = 50.0 // % increase that triggers degradation alert
+    var onPattern: Bool = false // Alert on intermittent failures
+    var patternThreshold: Int = 3 // Number of failures in pattern window
+    var patternWindow: Int = 10 // Window size for pattern detection
+}
+
 struct Host: Identifiable, Codable {
     let id: UUID
     var name: String
@@ -127,6 +142,7 @@ struct Host: Identifiable, Codable {
     var isActive: Bool = false
     var isDefault: Bool = false
     var pingSettings: PingSettings = PingSettings()
+    var notificationSettings: NotificationSettings = NotificationSettings()
 
     init(name: String, address: String, isActive: Bool = false, isDefault: Bool = false) {
         self.id = UUID()
@@ -135,6 +151,7 @@ struct Host: Identifiable, Codable {
         self.isActive = isActive
         self.isDefault = isDefault
         self.pingSettings = PingSettings()
+        self.notificationSettings = NotificationSettings()
     }
 }
 
@@ -148,6 +165,31 @@ class PingService: ObservableObject {
     @Published var hostLatestResults: [String: PingResult] = [:] // Track latest result per host
     @Published var isCompactMode: Bool = false
     @Published var isStayOnTop: Bool = false
+
+    // General notification settings
+    @Published var notificationsEnabled: Bool = false
+    @Published var notifyNoInternet: Bool = false
+    @Published var notifyNetworkChange: Bool = false
+    @Published var notifyAllHosts: Bool = false
+    @Published var startOnLaunch: Bool = false
+
+    // Display settings
+    @Published var showHosts: Bool = true
+    @Published var showGraph: Bool = true
+    @Published var showHistory: Bool = true
+    @Published var showHistorySummary: Bool = false
+
+    // Store previous notification settings to restore
+    var savedHostNotificationSettings: [String: NotificationSettings] = [:]
+
+    // Notification tracking
+    private var hostPreviousResults: [String: PingResult] = [:] // Track previous result for comparison
+    private var hostFailureCount: [String: Int] = [:] // Track consecutive failures
+    private var hostBaselinePing: [String: Double] = [:] // Track baseline ping for degradation detection
+    private var hostPatternHistory: [String: [Bool]] = [:] // Track success/failure pattern
+    private var hasRequestedNotificationPermission = false
+    private var lastGatewayAddress: String? = nil
+
     private var timers: [String: Timer] = [:]
     private var gatewayRefreshTimer: Timer?
 
@@ -188,6 +230,12 @@ class PingService: ObservableObject {
 
                 // Clean up old ping history for the old gateway
                 hostLatestResults.removeValue(forKey: oldGateway)
+
+                // Check if notifications for network change are enabled (global setting)
+                if notificationsEnabled && notifyNoInternet {
+                    sendNotification(title: "Network Change Detected",
+                                   body: "Gateway changed from \(oldGateway) to \(currentGateway)")
+                }
             }
         }
     }
@@ -247,6 +295,9 @@ class PingService: ObservableObject {
 
         // Update widget data
         updateWidgetData()
+
+        // Check for notification conditions
+        checkNotificationConditions(result, for: host)
     }
 
     private func updateWidgetData() {
@@ -455,6 +506,159 @@ class PingService: ObservableObject {
         }
         return Double(output[timeRange])
     }
+
+    // MARK: - Notification Methods
+
+    func requestNotificationPermission() {
+        guard !hasRequestedNotificationPermission else { return }
+        hasRequestedNotificationPermission = true
+
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            DispatchQueue.main.async {
+                self.notificationsEnabled = granted
+                if let error = error {
+                    print("Error requesting notification permission: \(error)")
+                }
+            }
+        }
+    }
+
+    private func checkNotificationConditions(_ result: PingResult, for host: Host) {
+        guard notificationsEnabled else { return }
+        guard notifyAllHosts || host.notificationSettings.enabled else { return }
+
+        let previousResult = hostPreviousResults[host.address]
+        defer { hostPreviousResults[host.address] = result }
+
+        // Update pattern history
+        updatePatternHistory(for: host.address, success: result.status == .good)
+
+        // Check no response
+        if host.notificationSettings.onNoResponse && (result.status == .timeout || result.status == .error) {
+            if previousResult?.status == .good || previousResult == nil {
+                sendNotification(title: "\(host.name) Not Responding",
+                               body: "Unable to reach \(host.address)")
+            }
+        }
+
+        // Check threshold
+        if let pingTime = result.pingTime,
+           host.notificationSettings.onThreshold,
+           pingTime > host.notificationSettings.thresholdMs {
+            sendNotification(title: "\(host.name) High Latency",
+                           body: String(format: "Ping time: %.1fms (threshold: %.0fms)", pingTime, host.notificationSettings.thresholdMs))
+        }
+
+        // Check recovery
+        if host.notificationSettings.onRecovery,
+           result.status == .good,
+           let previous = previousResult,
+           (previous.status == .timeout || previous.status == .error) {
+            sendNotification(title: "\(host.name) Recovered",
+                           body: "Connection restored to \(host.address)")
+        }
+
+        // Check degradation
+        if host.notificationSettings.onDegradation,
+           let pingTime = result.pingTime,
+           let baseline = hostBaselinePing[host.address] {
+            let percentIncrease = ((pingTime - baseline) / baseline) * 100
+            if percentIncrease > host.notificationSettings.degradationPercent {
+                sendNotification(title: "\(host.name) Performance Degraded",
+                               body: String(format: "Ping increased by %.0f%% (%.1fms → %.1fms)", percentIncrease, baseline, pingTime))
+            }
+        }
+
+        // Update baseline if needed
+        if result.status == .good, let pingTime = result.pingTime {
+            if hostBaselinePing[host.address] == nil || pingTime < hostBaselinePing[host.address]! {
+                hostBaselinePing[host.address] = pingTime
+            }
+        }
+
+        // Check pattern
+        if host.notificationSettings.onPattern {
+            checkPatternNotification(for: host)
+        }
+
+        // Check no internet (all hosts failing)
+        if notifyNoInternet {
+            checkInternetConnectivity()
+        }
+    }
+
+    private func updatePatternHistory(for address: String, success: Bool) {
+        if hostPatternHistory[address] == nil {
+            hostPatternHistory[address] = []
+        }
+        hostPatternHistory[address]?.append(success)
+        if hostPatternHistory[address]!.count > 20 { // Keep last 20 results
+            hostPatternHistory[address]?.removeFirst()
+        }
+    }
+
+    private func checkPatternNotification(for host: Host) {
+        guard let history = hostPatternHistory[host.address],
+              history.count >= host.notificationSettings.patternWindow else { return }
+
+        let recentHistory = Array(history.suffix(host.notificationSettings.patternWindow))
+        let failures = recentHistory.filter { !$0 }.count
+
+        if failures >= host.notificationSettings.patternThreshold {
+            sendNotification(title: "\(host.name) Intermittent Failures",
+                           body: "\(failures) failures in last \(host.notificationSettings.patternWindow) pings")
+        }
+    }
+
+    private func checkInternetConnectivity() {
+        let failingHosts = hosts.filter { host in
+            guard let result = hostLatestResults[host.address] else { return false }
+            return result.status == .timeout || result.status == .error
+        }
+
+        if failingHosts.count == hosts.count && hosts.count > 0 {
+            sendNotification(title: "Internet Connection Lost",
+                           body: "All monitored hosts are unreachable")
+        }
+    }
+
+    private func sendNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+
+        let request = UNNotificationRequest(identifier: UUID().uuidString,
+                                           content: content,
+                                           trigger: nil)
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error sending notification: \(error)")
+            }
+        }
+    }
+
+    func disableNotifications() {
+        // Save current notification settings for all hosts
+        savedHostNotificationSettings.removeAll()
+        for host in hosts {
+            if host.notificationSettings.enabled {
+                savedHostNotificationSettings[host.address] = host.notificationSettings
+            }
+        }
+
+        // Disable all notification settings
+        notificationsEnabled = false
+        notifyNoInternet = false
+        notifyNetworkChange = false
+        notifyAllHosts = false
+
+        // Disable notifications for all hosts
+        for i in hosts.indices {
+            hosts[i].notificationSettings.enabled = false
+        }
+    }
 }
 
 // MARK: - SwiftUI Views
@@ -483,66 +687,98 @@ struct CompactView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Host selection and controls
-            HStack {
-                // Host picker
-                Picker("Host", selection: $selectedHostIndex) {
-                    ForEach(Array(pingService.hosts.enumerated()), id: \.offset) { index, host in
-                        Text(host.name)
-                            .font(.system(size: 10, weight: .medium))
-                            .tag(index)
+            if pingService.showHosts {
+                HStack {
+                    // Host picker (no label, wider)
+                    Picker("", selection: $selectedHostIndex) {
+                        ForEach(Array(pingService.hosts.enumerated()), id: \.offset) { index, host in
+                            Text(host.name)
+                                .font(.system(size: 10, weight: .medium))
+                                .tag(index)
+                        }
                     }
-                }
-                .pickerStyle(MenuPickerStyle())
-                .frame(width: 120)
+                    .pickerStyle(MenuPickerStyle())
+                    .frame(width: 130)
 
-                Spacer()
+                    Spacer()
 
-                // Settings button
-                Button(action: {
-                    showingSettings = true
-                }) {
-                    Image(systemName: "gear")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(BorderlessButtonStyle())
+                    // Settings button
+                    Button(action: {
+                        showingSettings = true
+                    }) {
+                        Image(systemName: "gear")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
 
-                // Expand button
-                Button(action: {
-                    pingService.isCompactMode = false
-                }) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                    // Expand button
+                    Button(action: {
+                        pingService.isCompactMode = false
+                    }) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
                 }
-                .buttonStyle(BorderlessButtonStyle())
+                .padding(.horizontal, 8)
+                .padding(.top, 6)
+
+                Divider()
+            } else {
+                // Just settings and expand buttons when hosts are hidden
+                HStack {
+                    Spacer()
+
+                    // Settings button
+                    Button(action: {
+                        showingSettings = true
+                    }) {
+                        Image(systemName: "gear")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
+
+                    // Expand button
+                    Button(action: {
+                        pingService.isCompactMode = false
+                    }) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 6)
             }
-            .padding(.horizontal, 8)
-            .padding(.top, 6)
-
-            Divider()
 
             // Graph section (mini version)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Ping History")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 8)
+            if pingService.showGraph {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Ping History")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 8)
 
-                CompactGraphView(pingService: pingService, selectedHostIndex: selectedHostIndex)
-                    .frame(height: 60)
-                    .padding(.horizontal, 8)
+                    CompactGraphView(pingService: pingService, selectedHostIndex: selectedHostIndex)
+                        .frame(height: 60)
+                        .padding(.horizontal, 8)
+                }
+                .padding(.top, 4)
+
+                Divider()
             }
-            .padding(.top, 4)
-
-            Divider()
 
             // Recent results (mini version)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Recent Results")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 8)
+            if pingService.showHistory {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recent Results")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 8)
 
                 ScrollView {
                     LazyVStack(spacing: 1) {
@@ -555,12 +791,13 @@ struct CompactView: View {
                 .padding(.horizontal, 8)
             }
             .padding(.bottom, 6)
+            }
         }
-        .frame(width: 280, height: 220)
+        .frame(width: 200, height: calculateCompactHeight())
         .background(Color(NSColor.windowBackgroundColor))
         .sheet(isPresented: $showingSettings) {
             SettingsView(pingService: pingService)
-                .frame(width: 500, height: 600)
+                .frame(width: 500, height: 580)
         }
     }
 
@@ -568,6 +805,24 @@ struct CompactView: View {
         guard selectedHostIndex < pingService.hosts.count else { return [] }
         let currentHostAddress = pingService.hosts[selectedHostIndex].address
         return pingService.pingHistory.filter { $0.host == currentHostAddress }
+    }
+
+    private func calculateCompactHeight() -> CGFloat {
+        var height: CGFloat = 40 // Base height for controls
+
+        if pingService.showHosts {
+            height += 40 // Host picker height
+        }
+
+        if pingService.showGraph {
+            height += 80 // Compact graph height
+        }
+
+        if pingService.showHistory {
+            height += 100 // Compact history height
+        }
+
+        return height
     }
 }
 
@@ -713,21 +968,27 @@ struct ContentView: View {
             CompactView(pingService: pingService, showingSettings: $showingSettings)
         } else {
             VStack(spacing: 0) {
-                hostTabsSection
-                Divider()
-                graphSection
-                Divider()
-                historySection
+                if pingService.showHosts {
+                    hostTabsSection
+                }
+                if pingService.showGraph {
+                    if pingService.showHosts { Divider() }
+                    graphSection
+                }
+                if pingService.showHistory {
+                    if pingService.showHosts || pingService.showGraph { Divider() }
+                    historySection
+                }
                 Divider()
             }
-            .frame(width: 450, height: showingDetailedStats ? 620 : 500)
+            .frame(width: 450, height: calculateDynamicHeight())
             .background(Color(NSColor.windowBackgroundColor))
             .onAppear {
                 updateActiveHost(selectedHostIndex)
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView(pingService: pingService)
-                    .frame(width: 500, height: 600)
+                    .frame(width: 500, height: 580)
             }
             .sheet(isPresented: $showingExport) {
                 ExportView(pingService: pingService)
@@ -846,14 +1107,9 @@ struct ContentView: View {
                     .fill(getHostStatusColor(host: host))
                     .frame(width: 10, height: 10)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(host.name)
-                        .font(.system(size: 13, weight: .semibold))
-                    Text(host.address)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-                .foregroundColor(selectedHostIndex == index ? .white : .primary)
+                Text(host.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(selectedHostIndex == index ? .white : .primary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -909,9 +1165,11 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16)
 
-            GraphView(history: filteredHistory)
-                .frame(height: 140)
-                .padding(.horizontal, 16)
+            if pingService.showGraph {
+                GraphView(history: filteredHistory)
+                    .frame(height: 140)
+                    .padding(.horizontal, 16)
+            }
         }
         .padding(.vertical, 12)
     }
@@ -930,9 +1188,9 @@ struct ContentView: View {
                 Spacer()
                 HStack(spacing: 8) {
                     Button(action: {
-                        showingDetailedStats.toggle()
+                        pingService.showHistorySummary.toggle()
                     }) {
-                        Image(systemName: showingDetailedStats ? "info.circle.fill" : "info.circle")
+                        Image(systemName: pingService.showHistorySummary ? "info.circle.fill" : "info.circle")
                             .font(.caption)
                             .foregroundColor(.blue)
                     }
@@ -986,11 +1244,32 @@ struct ContentView: View {
             }
             .frame(height: 160)
 
-            if showingDetailedStats {
+            if pingService.showHistorySummary {
                 detailedStatsSection
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private func calculateDynamicHeight() -> CGFloat {
+        var height: CGFloat = 60 // Base padding
+
+        if pingService.showHosts {
+            height += 120 // Host tabs section height
+        }
+
+        if pingService.showGraph {
+            height += 170 // Graph section height
+        }
+
+        if pingService.showHistory {
+            height += 200 // History section base height
+            if pingService.showHistorySummary {
+                height += 120 // Additional height for detailed stats
+            }
+        }
+
+        return height
     }
 
     private func updateActiveHost(_ index: Int) {
@@ -1221,22 +1500,45 @@ struct SettingsView: View {
     @State private var gatewayMode: GatewayMode = .discovered
     @State private var manualGatewayAddress: String = ""
 
+    // Notification settings editing states
+    @State private var editingNotificationEnabled = false
+    @State private var editingOnNoResponse = false
+    @State private var editingOnThreshold = false
+    @State private var editingThresholdMs: Double = 2000.0
+    @State private var editingOnNetworkChange = false
+    @State private var editingOnRecovery = false
+    @State private var editingOnDegradation = false
+    @State private var editingDegradationPercent: Double = 50.0
+    @State private var editingOnPattern = false
+    @State private var editingPatternThreshold: Int = 3
+    @State private var editingPatternWindow: Int = 10
+    @State private var showAdvancedSettings = false
+    @State private var showDisableNotificationsConfirmation = false
+    @State private var hostsWithNotifications: [String] = []
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             headerSection
 
             hostListSection
 
-            Spacer()
-
             bottomButtons
         }
         .padding(20)
         .background(Color(NSColor.windowBackgroundColor))
+        .frame(width: 500)
         .alert("Error", isPresented: $showError) {
             Button("OK") { }
         } message: {
             Text(errorMessage)
+        }
+        .alert("Disable Notifications", isPresented: $showDisableNotificationsConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Disable", role: .destructive) {
+                pingService.disableNotifications()
+            }
+        } message: {
+            Text("This will disable notifications for hosts: \(hostsWithNotifications.joined(separator: ", "))")
         }
         .sheet(isPresented: $showingAddHost) {
             addHostSheet
@@ -1253,32 +1555,17 @@ struct SettingsView: View {
                     .font(.title)
                     .fontWeight(.bold)
                 Spacer()
-                Button("Done") {
-                    presentationMode.wrappedValue.dismiss()
-                }
-                .buttonStyle(.borderedProminent)
             }
 
             Text("Manage hosts for network monitoring")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            // Compact Mode Toggle
-            HStack {
-                Image(systemName: "rectangle.compress.vertical")
-                    .foregroundColor(.blue)
-                Toggle("Compact Mode", isOn: $pingService.isCompactMode)
-                    .font(.subheadline)
-            }
-            .padding(.top, 4)
+            Divider()
+                .padding(.vertical, 8)
 
-            // Stay on Top Toggle
-            HStack {
-                Image(systemName: "pin.fill")
-                    .foregroundColor(.orange)
-                Toggle("Stay on Top", isOn: $pingService.isStayOnTop)
-                    .font(.subheadline)
-            }
+            // Application Settings - Compact single line
+            settingsRow
         }
     }
 
@@ -1331,14 +1618,12 @@ struct SettingsView: View {
     }
 
     private var hostsList: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach(pingService.hosts) { host in
-                    hostRow(host: host)
-                }
+        VStack(spacing: 2) {
+            ForEach(pingService.hosts) { host in
+                hostRow(host: host)
             }
         }
-        .frame(height: 300)
+        .frame(maxHeight: 300)
     }
 
     private func hostRow(host: Host) -> some View {
@@ -1347,23 +1632,29 @@ struct SettingsView: View {
                 .fill(getHostStatusColor(host: host))
                 .frame(width: 12, height: 12)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(host.name)
-                        .font(.system(size: 15, weight: .semibold))
-                    if host.isActive {
-                        Text("ACTIVE")
-                            .font(.system(size: 9, weight: .bold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.green.opacity(0.2))
-                            .foregroundColor(.green)
-                            .cornerRadius(4)
-                    }
+            HStack(spacing: 8) {
+                Text(host.name)
+                    .font(.system(size: 14, weight: .semibold))
+
+                if host.isActive {
+                    Text("ACTIVE")
+                        .font(.system(size: 8, weight: .bold))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.green.opacity(0.2))
+                        .foregroundColor(.green)
+                        .cornerRadius(3)
                 }
+
                 Text(host.address)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .foregroundColor(.secondary)
+
+                if host.notificationSettings.enabled || pingService.notifyAllHosts {
+                    Image(systemName: "bell.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.purple)
+                }
             }
 
             Spacer()
@@ -1383,17 +1674,253 @@ struct SettingsView: View {
                 .foregroundColor(.red)
             }
         }
-        .padding(16)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 8)
                 .fill(Color(NSColor.controlBackgroundColor))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.gray.opacity(0.2), lineWidth: 1)
                 )
         )
     }
 
+
+    private var settingsRow: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            // Section 1: App Settings
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Application")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fontWeight(.medium)
+
+                HStack(spacing: 24) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "rectangle.compress.vertical")
+                            .foregroundColor(.blue)
+                            .font(.caption)
+                        Toggle("Compact Mode", isOn: $pingService.isCompactMode)
+                            .font(.caption)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "pin.fill")
+                            .foregroundColor(.orange)
+                            .font(.caption)
+                        Toggle("Stay on Top", isOn: $pingService.isStayOnTop)
+                            .font(.caption)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Toggle("Start on Launch", isOn: $pingService.startOnLaunch)
+                            .font(.caption)
+                    }
+
+                    Spacer()
+                }
+            }
+
+            // Section 2: Display Settings
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Display")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fontWeight(.medium)
+
+                HStack(spacing: 24) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "server.rack")
+                            .foregroundColor(.purple)
+                            .font(.caption)
+                        Toggle("Monitored Hosts", isOn: Binding(
+                            get: { pingService.showHosts },
+                            set: { newValue in
+                                let activeCount = (newValue ? 1 : 0) + (pingService.showGraph ? 1 : 0) + (pingService.showHistory ? 1 : 0)
+                                if activeCount > 0 {
+                                    pingService.showHosts = newValue
+                                }
+                            }
+                        ))
+                        .font(.caption)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .foregroundColor(.blue)
+                            .font(.caption)
+                        Toggle("Show Graph", isOn: Binding(
+                            get: { pingService.showGraph },
+                            set: { newValue in
+                                let activeCount = (pingService.showHosts ? 1 : 0) + (newValue ? 1 : 0) + (pingService.showHistory ? 1 : 0)
+                                if activeCount > 0 {
+                                    pingService.showGraph = newValue
+                                }
+                            }
+                        ))
+                        .font(.caption)
+                    }
+
+                    Spacer()
+                }
+
+                HStack(spacing: 24) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundColor(.cyan)
+                            .font(.caption)
+                        Toggle("Show History", isOn: Binding(
+                            get: { pingService.showHistory },
+                            set: { newValue in
+                                let activeCount = (pingService.showHosts ? 1 : 0) + (pingService.showGraph ? 1 : 0) + (newValue ? 1 : 0)
+                                if activeCount > 0 {
+                                    pingService.showHistory = newValue
+                                }
+                            }
+                        ))
+                        .font(.caption)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "list.bullet.clipboard")
+                            .foregroundColor(.orange)
+                            .font(.caption)
+                        Toggle("History Summary", isOn: $pingService.showHistorySummary)
+                            .font(.caption)
+                    }
+
+                    Spacer()
+                }
+            }
+
+            // Section 3: Notifications
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Notifications")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fontWeight(.medium)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "bell.fill")
+                        .foregroundColor(.purple)
+                        .font(.caption)
+                    Toggle("Enable Notifications", isOn: Binding(
+                        get: { pingService.notificationsEnabled },
+                        set: { newValue in
+                            if newValue {
+                                // User is enabling notifications - always allow this
+                                pingService.notificationsEnabled = true
+
+                                // Restore saved settings or set defaults
+                                if pingService.savedHostNotificationSettings.isEmpty {
+                                    // First time enabling - set defaults
+                                    pingService.notifyNoInternet = true
+                                    pingService.notifyNetworkChange = true
+                                    pingService.notifyAllHosts = false
+
+                                    // Enable defaults for first host only
+                                    if !pingService.hosts.isEmpty {
+                                        pingService.hosts[0].notificationSettings.enabled = true
+                                        pingService.hosts[0].notificationSettings.onNoResponse = true
+                                        pingService.hosts[0].notificationSettings.onThreshold = true
+                                        pingService.hosts[0].notificationSettings.onRecovery = true
+                                    }
+                                } else {
+                                    // Restore previously saved settings
+                                    for i in pingService.hosts.indices {
+                                        let host = pingService.hosts[i]
+                                        if let saved = pingService.savedHostNotificationSettings[host.address] {
+                                            pingService.hosts[i].notificationSettings = saved
+                                        }
+                                    }
+                                }
+                                pingService.requestNotificationPermission()
+                            } else {
+                                // User is trying to disable notifications
+                                let enabledHosts = pingService.hosts.filter { host in
+                                    host.notificationSettings.enabled || pingService.notifyAllHosts
+                                }.map { $0.name }
+
+                                if !enabledHosts.isEmpty {
+                                    // Show confirmation dialog
+                                    hostsWithNotifications = enabledHosts
+                                    showDisableNotificationsConfirmation = true
+                                    // Don't change the toggle state - let confirmation handle it
+                                } else {
+                                    // No hosts enabled, safe to disable immediately
+                                    pingService.disableNotifications()
+                                }
+                            }
+                        }
+                    ))
+                        .font(.caption)
+                }
+
+                if pingService.notificationsEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 24) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "wifi.slash")
+                                    .foregroundColor(.red)
+                                Toggle("Alert on no internet", isOn: $pingService.notifyNoInternet)
+                                    .font(.caption2)
+                            }
+
+                            HStack(spacing: 6) {
+                                Image(systemName: "network")
+                                    .foregroundColor(.orange)
+                                Toggle("Alert on network change", isOn: $pingService.notifyNetworkChange)
+                                    .font(.caption2)
+                            }
+                        }
+
+                        HStack(spacing: 6) {
+                            Image(systemName: "server.rack")
+                                .foregroundColor(.blue)
+                            Toggle("Enable for all hosts", isOn: Binding(
+                                get: { pingService.notifyAllHosts },
+                                set: { enabled in
+                                    pingService.notifyAllHosts = enabled
+                                    if enabled {
+                                        // Enable defaults for all hosts
+                                        for i in pingService.hosts.indices {
+                                            pingService.hosts[i].notificationSettings.enabled = true
+                                            pingService.hosts[i].notificationSettings.onNoResponse = true
+                                            pingService.hosts[i].notificationSettings.onThreshold = true
+                                            pingService.hosts[i].notificationSettings.onRecovery = true
+                                        }
+                                    }
+                                }
+                            ))
+                            .font(.caption2)
+                        }
+                    }
+
+                    Text("Individual host notification settings can be configured when editing each host")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.leading, 16)
+                }
+            }
+        }
+    }
+
+    private func calculateSettingsDialogHeight() -> CGFloat {
+        // Fixed height that accommodates all content properly
+        // The ScrollView for hosts already has a fixed height of 300px
+        // so we don't need to calculate based on number of hosts
+
+        if pingService.notificationsEnabled {
+            return 680 // Extra height for notification sub-options
+        } else {
+            return 620 // Base height without notification options
+        }
+    }
 
     private var bottomButtons: some View {
         HStack {
@@ -1408,6 +1935,11 @@ struct SettingsView: View {
                 presentationMode.wrappedValue.dismiss()
             }
             .buttonStyle(.bordered)
+
+            Button("Done") {
+                presentationMode.wrappedValue.dismiss()
+            }
+            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -1514,80 +2046,173 @@ struct SettingsView: View {
 
                     Divider()
 
-                    // Ping Configuration Section
+                    // Notification Settings Section
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Ping Configuration")
+                        Text("Notification Settings")
                             .font(.subheadline)
                             .fontWeight(.semibold)
 
-                        Text("Ping Type")
+                        Toggle("Enable notifications for this host", isOn: $editingNotificationEnabled)
                             .font(.caption)
-                            .fontWeight(.medium)
-                        Picker("Ping Type", selection: $editingPingType) {
-                            ForEach(PingType.allCases, id: \.self) { type in
-                                Text(type.description).tag(type)
-                            }
-                        }
-                        .pickerStyle(.menu)
 
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Interval (seconds)")
+                        if editingNotificationEnabled || pingService.notifyAllHosts {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Toggle("Alert on no response", isOn: $editingOnNoResponse)
                                     .font(.caption)
-                                    .fontWeight(.medium)
-                                TextField("2.0", value: $editingInterval, format: .number)
-                                    .textFieldStyle(.roundedBorder)
-                            }
 
-                            VStack(alignment: .leading) {
-                                Text("Timeout (seconds)")
+                                HStack {
+                                    Toggle("Alert on high latency", isOn: $editingOnThreshold)
+                                        .font(.caption)
+                                    if editingOnThreshold {
+                                        Text("Above:")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        TextField("2000", value: $editingThresholdMs, format: .number)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 60)
+                                        Text("ms")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+
+
+                                Toggle("Alert on recovery", isOn: $editingOnRecovery)
                                     .font(.caption)
-                                    .fontWeight(.medium)
-                                TextField("3.0", value: $editingTimeout, format: .number)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                        }
 
-                        if editingPingType != .icmp {
-                            Text("Port (optional)")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                            TextField(editingPingType == .udp ? "53 (DNS)" : "80 (HTTP)", text: $editingPort)
-                                .textFieldStyle(.roundedBorder)
+                                HStack {
+                                    Toggle("Alert on degradation", isOn: $editingOnDegradation)
+                                        .font(.caption)
+                                    if editingOnDegradation {
+                                        TextField("50", value: $editingDegradationPercent, format: .number)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 50)
+                                        Text("% increase")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+
+                                HStack {
+                                    Toggle("Alert on pattern", isOn: $editingOnPattern)
+                                        .font(.caption)
+                                    if editingOnPattern {
+                                        TextField("3", value: $editingPatternThreshold, format: .number)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 40)
+                                        Text("failures in")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        TextField("10", value: $editingPatternWindow, format: .number)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 40)
+                                        Text("pings")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                            .padding(.leading, 20)
                         }
                     }
 
-                    Divider()
-
-                    // Thresholds Section
+                    // Advanced Settings - Collapsible
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Response Time Thresholds (ms)")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Good (Green)")
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.green)
-                                TextField("50.0", value: $editingGoodThreshold, format: .number)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-
-                            VStack(alignment: .leading) {
-                                Text("Warning (Yellow)")
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.orange)
-                                TextField("200.0", value: $editingWarningThreshold, format: .number)
-                                    .textFieldStyle(.roundedBorder)
+                        Button(action: { showAdvancedSettings.toggle() }) {
+                            HStack {
+                                Image(systemName: showAdvancedSettings ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.blue)
+                                Text("Advanced Settings")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                Spacer()
                             }
                         }
+                        .buttonStyle(.plain)
 
-                        Text("Above warning threshold = Error (Red)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                        if showAdvancedSettings {
+                            VStack(alignment: .leading, spacing: 12) {
+                                // Ping Configuration Section
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Ping Configuration")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.secondary)
+
+                                    HStack {
+                                        Text("Type:")
+                                            .font(.caption2)
+                                        Picker("Ping Type", selection: $editingPingType) {
+                                            ForEach(PingType.allCases, id: \.self) { type in
+                                                Text(type.rawValue).tag(type)
+                                            }
+                                        }
+                                        .pickerStyle(.menu)
+                                        .font(.caption2)
+                                    }
+
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            Text("Interval (s)")
+                                                .font(.caption2)
+                                            TextField("2.0", value: $editingInterval, format: .number)
+                                                .textFieldStyle(.roundedBorder)
+                                                .font(.caption2)
+                                        }
+
+                                        VStack(alignment: .leading) {
+                                            Text("Timeout (s)")
+                                                .font(.caption2)
+                                            TextField("3.0", value: $editingTimeout, format: .number)
+                                                .textFieldStyle(.roundedBorder)
+                                                .font(.caption2)
+                                        }
+                                    }
+
+                                    if editingPingType != .icmp {
+                                        HStack {
+                                            Text("Port:")
+                                                .font(.caption2)
+                                            TextField(editingPingType == .udp ? "53" : "80", text: $editingPort)
+                                                .textFieldStyle(.roundedBorder)
+                                                .font(.caption2)
+                                                .frame(width: 60)
+                                        }
+                                    }
+                                }
+
+                                // Thresholds Section
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Response Time Thresholds (ms)")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.secondary)
+
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            Text("Good")
+                                                .font(.caption2)
+                                                .foregroundColor(.green)
+                                            TextField("50", value: $editingGoodThreshold, format: .number)
+                                                .textFieldStyle(.roundedBorder)
+                                                .font(.caption2)
+                                        }
+
+                                        VStack(alignment: .leading) {
+                                            Text("Warning")
+                                                .font(.caption2)
+                                                .foregroundColor(.orange)
+                                            TextField("200", value: $editingWarningThreshold, format: .number)
+                                                .textFieldStyle(.roundedBorder)
+                                                .font(.caption2)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.leading, 16)
+                        }
                     }
                 }
 
@@ -1606,7 +2231,7 @@ struct SettingsView: View {
             }
         }
         .padding(20)
-        .frame(width: 450, height: 600)
+        .frame(width: 450, height: 550)
         .onAppear {
             newHostName = host.name
             newHostAddress = host.address
@@ -1621,6 +2246,18 @@ struct SettingsView: View {
             if host.name == "Default Gateway" {
                 gatewayMode = .discovered // Default to discovered mode
             }
+
+            // Initialize notification settings
+            editingNotificationEnabled = host.notificationSettings.enabled
+            editingOnNoResponse = host.notificationSettings.onNoResponse
+            editingOnThreshold = host.notificationSettings.onThreshold
+            editingThresholdMs = host.notificationSettings.thresholdMs
+            editingOnRecovery = host.notificationSettings.onRecovery
+            editingOnDegradation = host.notificationSettings.onDegradation
+            editingDegradationPercent = host.notificationSettings.degradationPercent
+            editingOnPattern = host.notificationSettings.onPattern
+            editingPatternThreshold = host.notificationSettings.patternThreshold
+            editingPatternWindow = host.notificationSettings.patternWindow
         }
     }
 
@@ -1679,6 +2316,21 @@ struct SettingsView: View {
         }
 
         pingService.hosts[index].pingSettings = newSettings
+
+        // Update notification settings
+        var newNotificationSettings = pingService.hosts[index].notificationSettings
+        newNotificationSettings.enabled = editingNotificationEnabled
+        newNotificationSettings.onNoResponse = editingOnNoResponse
+        newNotificationSettings.onThreshold = editingOnThreshold
+        newNotificationSettings.thresholdMs = editingThresholdMs
+        newNotificationSettings.onRecovery = editingOnRecovery
+        newNotificationSettings.onDegradation = editingOnDegradation
+        newNotificationSettings.degradationPercent = editingDegradationPercent
+        newNotificationSettings.onPattern = editingOnPattern
+        newNotificationSettings.patternThreshold = editingPatternThreshold
+        newNotificationSettings.patternWindow = editingPatternWindow
+
+        pingService.hosts[index].notificationSettings = newNotificationSettings
 
         // Restart pinging with new settings if this host is being monitored
         if pingService.hosts[index].isActive {
