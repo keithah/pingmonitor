@@ -18,39 +18,46 @@ import SwiftUI
 import AppKit
 import Foundation
 import Combine
+import Network
+import SystemConfiguration
 
 // MARK: - Utilities
 
-/// Detects the default gateway IP address for local network monitoring
+/// Detects the default gateway IP address using SystemConfiguration (sandbox-compatible)
 func getDefaultGateway() -> String {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/sbin/route")
-    process.arguments = ["-n", "get", "default"]
+    var gateway: String = "192.168.1.1" // Fallback
 
-    let pipe = Pipe()
-    process.standardOutput = pipe
-
-    do {
-        try process.run()
-        process.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
-
-        let lines = output.components(separatedBy: .newlines)
-        for line in lines {
-            if line.contains("gateway:") {
-                let components = line.trimmingCharacters(in: .whitespaces).components(separatedBy: .whitespaces)
-                if components.count >= 2 {
-                    return components[1]
-                }
-            }
-        }
-    } catch {
-        print("Error getting default gateway: \(error)")
+    // Create a reference to the dynamic store
+    guard let store = SCDynamicStoreCreate(nil, "PingMonitor" as CFString, nil, nil) else {
+        return gateway
     }
 
-    return "192.168.1.1" // Fallback
+    // Get the global IPv4 key
+    let globalIPv4Key = SCDynamicStoreKeyCreateNetworkGlobalEntity(nil, kSCDynamicStoreDomainState, kSCEntNetIPv4)
+
+    // Get the global IPv4 dictionary
+    guard let globalIPv4Dict = SCDynamicStoreCopyValue(store, globalIPv4Key) as? [String: Any] else {
+        return gateway
+    }
+
+    // Try to get router from global dict first
+    if let primaryRouter = globalIPv4Dict[kSCPropNetIPv4Router as String] as? String {
+        return primaryRouter
+    }
+
+    // Fallback: try to get from primary service
+    guard let serviceKey = globalIPv4Dict[kSCDynamicStorePropNetPrimaryService as String] as? String else {
+        return gateway
+    }
+
+    let serviceIPv4Key = SCDynamicStoreKeyCreateNetworkServiceEntity(nil, kSCDynamicStoreDomainState, serviceKey as CFString, kSCEntNetIPv4)
+
+    guard let serviceIPv4Dict = SCDynamicStoreCopyValue(store, serviceIPv4Key) as? [String: Any],
+          let routerIP = serviceIPv4Dict[kSCPropNetIPv4Router as String] as? String else {
+        return gateway
+    }
+
+    return routerIP
 }
 
 // MARK: - Data Models
@@ -139,6 +146,8 @@ class PingService: ObservableObject {
     @Published var currentHost: Host?
     @Published var hosts: [Host] = []
     @Published var hostLatestResults: [String: PingResult] = [:] // Track latest result per host
+    @Published var isCompactMode: Bool = false
+    @Published var isStayOnTop: Bool = false
     private var timers: [String: Timer] = [:]
     private var gatewayRefreshTimer: Timer?
 
@@ -235,6 +244,45 @@ class PingService: ObservableObject {
         if host.isActive || self.currentHost?.address == host.address {
             self.latestResult = result
         }
+
+        // Update widget data
+        updateWidgetData()
+    }
+
+    private func updateWidgetData() {
+        // Export data for widget consumption
+        let widgetData = hosts.map { host -> [String: Any] in
+            let result = hostLatestResults[host.address]
+            return [
+                "hostName": host.name,
+                "address": host.address,
+                "pingTime": result?.pingTime as Any,
+                "status": statusToString(result?.status ?? .timeout)
+            ]
+        }
+
+        // Save to shared container for widget
+        guard let sharedURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.pingmonitor.shared") else {
+            print("Failed to get shared container URL")
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: sharedURL, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: widgetData)
+            try data.write(to: sharedURL.appendingPathComponent("pingdata.json"))
+        } catch {
+            print("Failed to save widget data: \(error)")
+        }
+    }
+
+    private func statusToString(_ status: PingStatus) -> String {
+        switch status {
+        case .good: return "good"
+        case .warning: return "warning"
+        case .error: return "error"
+        case .timeout: return "timeout"
+        }
     }
 
     private func determineStatus(pingTime: Double, settings: PingSettings) -> PingStatus {
@@ -248,85 +296,154 @@ class PingService: ObservableObject {
     }
 
     private func performICMPPing(host: Host) -> PingResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/sbin/ping")
-        process.arguments = ["-c", "1", "-t", String(Int(host.pingSettings.timeout)), host.address]
+        let startTime = Date()
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
+        // For sandbox compatibility, try multiple common ports as ICMP alternative
+        // True ICMP requires raw sockets which need special entitlements not available in App Store
+        let commonPorts: [UInt16] = [53, 80, 443, 22, 25] // DNS, HTTP, HTTPS, SSH, SMTP
 
-        do {
-            try process.run()
-            process.waitUntilExit()
+        for port in commonPorts {
+            let result = tryTCPConnection(host: host.address, port: port, timeout: host.pingSettings.timeout / Double(commonPorts.count), startTime: startTime, settings: host.pingSettings)
 
-            if process.terminationStatus == 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-
-                if let pingTime = self.extractPingTime(from: output) {
-                    let status = self.determineStatus(pingTime: pingTime, settings: host.pingSettings)
-                    return PingResult(host: host.address, pingTime: pingTime, status: status)
-                } else {
-                    return PingResult(host: host.address, pingTime: nil, status: .timeout)
-                }
-            } else {
-                return PingResult(host: host.address, pingTime: nil, status: .error)
+            if result.status != .timeout {
+                return result
             }
-        } catch {
-            return PingResult(host: host.address, pingTime: nil, status: .error)
         }
+
+        return PingResult(host: host.address, pingTime: nil, status: .timeout)
+    }
+
+    private func tryTCPConnection(host: String, port: UInt16, timeout: TimeInterval, startTime: Date, settings: PingSettings) -> PingResult {
+        var result: PingResult?
+        let semaphore = DispatchSemaphore(value: 0)
+
+        let connection = NWConnection(
+            host: NWEndpoint.Host(host),
+            port: NWEndpoint.Port(integerLiteral: port),
+            using: .tcp
+        )
+
+        connection.start(queue: .global())
+
+        // Set timeout
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+            connection.cancel()
+            if result == nil {
+                result = PingResult(host: host, pingTime: nil, status: .timeout)
+                semaphore.signal()
+            }
+        }
+
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                let pingTime = Date().timeIntervalSince(startTime) * 1000 // Convert to ms
+                let status = self.determineStatus(pingTime: pingTime, settings: settings)
+                result = PingResult(host: host, pingTime: pingTime, status: status)
+                connection.cancel()
+                semaphore.signal()
+            case .failed(_), .cancelled:
+                if result == nil {
+                    result = PingResult(host: host, pingTime: nil, status: .timeout)
+                    semaphore.signal()
+                }
+            default:
+                break
+            }
+        }
+
+        semaphore.wait()
+        return result ?? PingResult(host: host, pingTime: nil, status: .timeout)
     }
 
     private func performUDPPing(host: Host) -> PingResult {
         let port = host.pingSettings.port ?? 53 // Default to DNS port
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
-        process.arguments = ["-u", "-z", "-w", String(Int(host.pingSettings.timeout)), host.address, String(port)]
-
         let startTime = Date()
+        var result: PingResult?
+        let semaphore = DispatchSemaphore(value: 0)
 
-        do {
-            try process.run()
-            process.waitUntilExit()
+        let connection = NWConnection(
+            host: NWEndpoint.Host(host.address),
+            port: NWEndpoint.Port(integerLiteral: UInt16(port)),
+            using: .udp
+        )
 
-            let endTime = Date()
-            let pingTime = endTime.timeIntervalSince(startTime) * 1000 // Convert to ms
+        connection.start(queue: .global())
 
-            if process.terminationStatus == 0 {
-                let status = self.determineStatus(pingTime: pingTime, settings: host.pingSettings)
-                return PingResult(host: host.address, pingTime: pingTime, status: status)
-            } else {
-                return PingResult(host: host.address, pingTime: nil, status: .timeout)
+        // Set timeout
+        DispatchQueue.global().asyncAfter(deadline: .now() + host.pingSettings.timeout) {
+            connection.cancel()
+            if result == nil {
+                result = PingResult(host: host.address, pingTime: nil, status: .timeout)
+                semaphore.signal()
             }
-        } catch {
-            return PingResult(host: host.address, pingTime: nil, status: .error)
         }
+
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                let pingTime = Date().timeIntervalSince(startTime) * 1000 // Convert to ms
+                let status = self.determineStatus(pingTime: pingTime, settings: host.pingSettings)
+                result = PingResult(host: host.address, pingTime: pingTime, status: status)
+                connection.cancel()
+                semaphore.signal()
+            case .failed(_), .cancelled:
+                if result == nil {
+                    result = PingResult(host: host.address, pingTime: nil, status: .timeout)
+                    semaphore.signal()
+                }
+            default:
+                break
+            }
+        }
+
+        semaphore.wait()
+        return result ?? PingResult(host: host.address, pingTime: nil, status: .timeout)
     }
 
     private func performTCPPing(host: Host) -> PingResult {
         let port = host.pingSettings.port ?? 80 // Default to HTTP port
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
-        process.arguments = ["-z", "-w", String(Int(host.pingSettings.timeout)), host.address, String(port)]
-
         let startTime = Date()
+        var result: PingResult?
+        let semaphore = DispatchSemaphore(value: 0)
 
-        do {
-            try process.run()
-            process.waitUntilExit()
+        let connection = NWConnection(
+            host: NWEndpoint.Host(host.address),
+            port: NWEndpoint.Port(integerLiteral: UInt16(port)),
+            using: .tcp
+        )
 
-            let endTime = Date()
-            let pingTime = endTime.timeIntervalSince(startTime) * 1000 // Convert to ms
+        connection.start(queue: .global())
 
-            if process.terminationStatus == 0 {
-                let status = self.determineStatus(pingTime: pingTime, settings: host.pingSettings)
-                return PingResult(host: host.address, pingTime: pingTime, status: status)
-            } else {
-                return PingResult(host: host.address, pingTime: nil, status: .timeout)
+        // Set timeout
+        DispatchQueue.global().asyncAfter(deadline: .now() + host.pingSettings.timeout) {
+            connection.cancel()
+            if result == nil {
+                result = PingResult(host: host.address, pingTime: nil, status: .timeout)
+                semaphore.signal()
             }
-        } catch {
-            return PingResult(host: host.address, pingTime: nil, status: .error)
         }
+
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                let pingTime = Date().timeIntervalSince(startTime) * 1000 // Convert to ms
+                let status = self.determineStatus(pingTime: pingTime, settings: host.pingSettings)
+                result = PingResult(host: host.address, pingTime: pingTime, status: status)
+                connection.cancel()
+                semaphore.signal()
+            case .failed(_), .cancelled:
+                if result == nil {
+                    result = PingResult(host: host.address, pingTime: nil, status: .timeout)
+                    semaphore.signal()
+                }
+            default:
+                break
+            }
+        }
+
+        semaphore.wait()
+        return result ?? PingResult(host: host.address, pingTime: nil, status: .timeout)
     }
 
     private func extractPingTime(from output: String) -> Double? {
@@ -358,6 +475,231 @@ enum TimeFilter: String, CaseIterable {
     }
 }
 
+struct CompactView: View {
+    @ObservedObject var pingService: PingService
+    @Binding var showingSettings: Bool
+    @State private var selectedHostIndex = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Host selection and controls
+            HStack {
+                // Host picker
+                Picker("Host", selection: $selectedHostIndex) {
+                    ForEach(Array(pingService.hosts.enumerated()), id: \.offset) { index, host in
+                        Text(host.name)
+                            .font(.system(size: 10, weight: .medium))
+                            .tag(index)
+                    }
+                }
+                .pickerStyle(MenuPickerStyle())
+                .frame(width: 120)
+
+                Spacer()
+
+                // Settings button
+                Button(action: {
+                    showingSettings = true
+                }) {
+                    Image(systemName: "gear")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(BorderlessButtonStyle())
+
+                // Expand button
+                Button(action: {
+                    pingService.isCompactMode = false
+                }) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(BorderlessButtonStyle())
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+
+            Divider()
+
+            // Graph section (mini version)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ping History")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 8)
+
+                CompactGraphView(pingService: pingService, selectedHostIndex: selectedHostIndex)
+                    .frame(height: 60)
+                    .padding(.horizontal, 8)
+            }
+            .padding(.top, 4)
+
+            Divider()
+
+            // Recent results (mini version)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Recent Results")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 8)
+
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(compactFilteredHistory.prefix(6), id: \.id) { result in
+                            CompactHistoryRow(result: result)
+                        }
+                    }
+                }
+                .frame(maxHeight: 80)
+                .padding(.horizontal, 8)
+            }
+            .padding(.bottom, 6)
+        }
+        .frame(width: 280, height: 220)
+        .background(Color(NSColor.windowBackgroundColor))
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(pingService: pingService)
+                .frame(width: 500, height: 600)
+        }
+    }
+
+    private var compactFilteredHistory: [PingResult] {
+        guard selectedHostIndex < pingService.hosts.count else { return [] }
+        let currentHostAddress = pingService.hosts[selectedHostIndex].address
+        return pingService.pingHistory.filter { $0.host == currentHostAddress }
+    }
+}
+
+struct CompactGraphView: View {
+    @ObservedObject var pingService: PingService
+    let selectedHostIndex: Int
+
+    var body: some View {
+        let filteredHistory = getFilteredHistory()
+        let maxY = max(100.0, filteredHistory.compactMap { $0.pingTime }.max() ?? 100.0)
+
+        GeometryReader { geometry in
+            ZStack {
+                // Background
+                Rectangle()
+                    .fill(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(4)
+
+                if !filteredHistory.isEmpty {
+                    // Grid lines
+                    Path { path in
+                        let step = geometry.size.height / 4
+                        for i in 1..<4 {
+                            let y = step * CGFloat(i)
+                            path.move(to: CGPoint(x: 0, y: y))
+                            path.addLine(to: CGPoint(x: geometry.size.width, y: y))
+                        }
+                    }
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 0.5)
+
+                    // Data line
+                    Path { path in
+                        for (index, result) in filteredHistory.enumerated() {
+                            guard let pingTime = result.pingTime else { continue }
+
+                            let x = geometry.size.width * (1.0 - CGFloat(index) / CGFloat(max(filteredHistory.count - 1, 1)))
+                            let y = geometry.size.height * (1.0 - CGFloat(pingTime) / CGFloat(maxY))
+
+                            if index == 0 {
+                                path.move(to: CGPoint(x: x, y: y))
+                            } else {
+                                path.addLine(to: CGPoint(x: x, y: y))
+                            }
+                        }
+                    }
+                    .stroke(Color.blue, lineWidth: 1.5)
+
+                    // Data points
+                    ForEach(Array(filteredHistory.enumerated()), id: \.offset) { index, result in
+                        if let pingTime = result.pingTime {
+                            let x = geometry.size.width * (1.0 - CGFloat(index) / CGFloat(max(filteredHistory.count - 1, 1)))
+                            let y = geometry.size.height * (1.0 - CGFloat(pingTime) / CGFloat(maxY))
+
+                            Circle()
+                                .fill(result.status.swiftUIColor)
+                                .frame(width: 4, height: 4)
+                                .position(x: x, y: y)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func getFilteredHistory() -> [PingResult] {
+        guard selectedHostIndex < pingService.hosts.count else { return [] }
+        let currentHostAddress = pingService.hosts[selectedHostIndex].address
+        return Array(pingService.pingHistory.filter { $0.host == currentHostAddress }.prefix(20))
+    }
+}
+
+struct CompactHistoryRow: View {
+    let result: PingResult
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Time
+            Text(result.timestamp, style: .time)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 50, alignment: .leading)
+
+            // Host (shortened)
+            Text(shortHostName)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.primary)
+                .frame(width: 60, alignment: .leading)
+                .lineLimit(1)
+
+            Spacer()
+
+            // Ping time
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(result.status.swiftUIColor)
+                    .frame(width: 6, height: 6)
+
+                Text(pingTimeText)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundColor(result.status.swiftUIColor)
+                    .frame(width: 40, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
+    }
+
+    private var shortHostName: String {
+        if result.host.contains("8.8.8.8") {
+            return "Google"
+        } else if result.host.contains("1.1.1.1") {
+            return "Cloudflare"
+        } else if result.host.hasPrefix("192.168") {
+            return "Gateway"
+        } else {
+            return String(result.host.prefix(8))
+        }
+    }
+
+    private var pingTimeText: String {
+        guard let pingTime = result.pingTime else {
+            return "-"
+        }
+
+        if pingTime < 1000 {
+            return String(format: "%.0fms", pingTime)
+        } else {
+            return String(format: "%.1fs", pingTime / 1000)
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var pingService: PingService
     @State private var selectedHostIndex = 0
@@ -367,26 +709,30 @@ struct ContentView: View {
     @State private var showingDetailedStats = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            hostTabsSection
-            Divider()
-            graphSection
-            Divider()
-            historySection
-            Divider()
-        }
-        .frame(width: 450, height: showingDetailedStats ? 620 : 500)
-        .background(Color(NSColor.windowBackgroundColor))
-        .onAppear {
-            updateActiveHost(selectedHostIndex)
-        }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView(pingService: pingService)
-                .frame(width: 500, height: 600)
-        }
-        .sheet(isPresented: $showingExport) {
-            ExportView(pingService: pingService)
-                .frame(width: 400, height: 300)
+        if pingService.isCompactMode {
+            CompactView(pingService: pingService, showingSettings: $showingSettings)
+        } else {
+            VStack(spacing: 0) {
+                hostTabsSection
+                Divider()
+                graphSection
+                Divider()
+                historySection
+                Divider()
+            }
+            .frame(width: 450, height: showingDetailedStats ? 620 : 500)
+            .background(Color(NSColor.windowBackgroundColor))
+            .onAppear {
+                updateActiveHost(selectedHostIndex)
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView(pingService: pingService)
+                    .frame(width: 500, height: 600)
+            }
+            .sheet(isPresented: $showingExport) {
+                ExportView(pingService: pingService)
+                    .frame(width: 400, height: 300)
+            }
         }
     }
 
@@ -452,6 +798,25 @@ struct ContentView: View {
                     Menu {
                         Button("Settings") {
                             showingSettings = true
+                        }
+                        Divider()
+                        Button(action: { pingService.isCompactMode.toggle() }) {
+                            HStack {
+                                Text("Compact Mode")
+                                Spacer()
+                                if pingService.isCompactMode {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                        Button(action: { pingService.isStayOnTop.toggle() }) {
+                            HStack {
+                                Text("Stay on Top")
+                                Spacer()
+                                if pingService.isStayOnTop {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
                         }
                         Divider()
                         Button("Quit") {
@@ -897,6 +1262,23 @@ struct SettingsView: View {
             Text("Manage hosts for network monitoring")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
+
+            // Compact Mode Toggle
+            HStack {
+                Image(systemName: "rectangle.compress.vertical")
+                    .foregroundColor(.blue)
+                Toggle("Compact Mode", isOn: $pingService.isCompactMode)
+                    .font(.subheadline)
+            }
+            .padding(.top, 4)
+
+            // Stay on Top Toggle
+            HStack {
+                Image(systemName: "pin.fill")
+                    .foregroundColor(.orange)
+                Toggle("Stay on Top", isOn: $pingService.isStayOnTop)
+                    .font(.subheadline)
+            }
         }
     }
 
@@ -1612,13 +1994,16 @@ struct HistoryRow: View {
 
 // MARK: - Menu Bar Controller
 
-class MenuBarController: ObservableObject {
+class MenuBarController: NSObject, ObservableObject, NSWindowDelegate {
     private var statusItem: NSStatusItem?
     private var popover = NSPopover()
+    private var compactWindow: NSWindow?
     private var pingService = PingService()
     private var cancellables = Set<AnyCancellable>()
+    private var isRecreatingWindow = false
 
-    init() {
+    override init() {
+        super.init()
         setupMenuBar()
         setupBindings()
         startMonitoring()
@@ -1648,6 +2033,20 @@ class MenuBarController: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateStatusDisplay()
+            }
+            .store(in: &cancellables)
+
+        pingService.$isCompactMode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isCompact in
+                self?.handleCompactModeChange(isCompact: isCompact)
+            }
+            .store(in: &cancellables)
+
+        pingService.$isStayOnTop
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] stayOnTop in
+                self?.updateWindowStayOnTop(stayOnTop: stayOnTop)
             }
             .store(in: &cancellables)
     }
@@ -1724,6 +2123,12 @@ class MenuBarController: ObservableObject {
     @objc private func togglePopover() {
         guard let button = statusItem?.button else { return }
 
+        // If stay-on-top is enabled, show right-click menu instead of popover
+        if pingService.isStayOnTop {
+            showRightClickMenu()
+            return
+        }
+
         if popover.isShown {
             popover.performClose(nil)
         } else {
@@ -1758,6 +2163,16 @@ class MenuBarController: ObservableObject {
         let settingsItem = NSMenuItem(title: "Settings", action: #selector(showSettings), keyEquivalent: "")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let compactModeItem = NSMenuItem(title: "Compact Mode", action: #selector(toggleCompactMode), keyEquivalent: "")
+        compactModeItem.target = self
+        compactModeItem.state = pingService.isCompactMode ? .on : .off
+        menu.addItem(compactModeItem)
+
+        let stayOnTopItem = NSMenuItem(title: "Stay on Top", action: #selector(toggleStayOnTop), keyEquivalent: "")
+        stayOnTopItem.target = self
+        stayOnTopItem.state = pingService.isStayOnTop ? .on : .off
+        menu.addItem(stayOnTopItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1810,8 +2225,353 @@ class MenuBarController: ObservableObject {
     }
 
 
+    @objc private func toggleCompactMode() {
+        pingService.isCompactMode.toggle()
+    }
+
+    @objc private func toggleStayOnTop() {
+        pingService.isStayOnTop.toggle()
+    }
+
+    private func handleCompactModeChange(isCompact: Bool) {
+        // Simple approach: always close floating window and recreate if needed
+        closeAllFloatingWindows()
+
+        if isCompact && pingService.isStayOnTop {
+            // Only create floating window if both compact AND stay-on-top are enabled
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.createSimpleFloatingWindow(isCompact: true)
+            }
+        } else {
+            // Use popover for all other cases
+            updatePopoverSize()
+        }
+    }
+
+    private func showCompactFloatingWindow() {
+        // Ensure no existing window
+        if compactWindow != nil {
+            hideCompactFloatingWindow()
+        }
+
+        guard compactWindow == nil else { return }
+
+        // Create window with appropriate style based on stay-on-top
+        // Never include fullScreen in style mask to prevent crashes
+        let styleMask: NSWindow.StyleMask = pingService.isStayOnTop ?
+            [.borderless] :
+            [.titled, .closable, .miniaturizable, .resizable]
+
+        compactWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 220),
+            styleMask: styleMask,
+            backing: .buffered,
+            defer: false
+        )
+
+        guard let window = compactWindow else { return }
+
+        if !pingService.isStayOnTop {
+            window.title = "PingMonitor - Compact"
+        }
+
+        setupWindowContent()
+
+        // Position window near status item
+        if let button = statusItem?.button {
+            let buttonFrame = button.window?.convertToScreen(button.frame) ?? NSRect.zero
+            let windowOrigin = NSPoint(
+                x: buttonFrame.midX - 140, // Center window under status item
+                y: buttonFrame.minY - 240  // Position below status item
+            )
+            window.setFrameOrigin(windowOrigin)
+        } else {
+            window.center()
+        }
+
+        // Set window properties and prevent fullscreen
+        if pingService.isStayOnTop {
+            window.level = .floating
+            window.collectionBehavior = [.canJoinAllSpaces]
+            // Enable dragging for borderless windows
+            window.isMovableByWindowBackground = true
+        } else {
+            window.level = .normal
+            window.collectionBehavior = [.canJoinAllSpaces]
+        }
+
+        // Explicitly prevent all fullscreen behaviors
+        window.collectionBehavior.remove(.fullScreenPrimary)
+        window.collectionBehavior.remove(.fullScreenAuxiliary)
+
+        // Additional fullscreen prevention
+        if window.responds(to: #selector(NSWindow.toggleFullScreen(_:))) {
+            window.collectionBehavior.insert(.fullScreenDisallowsTiling)
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func updateFloatingWindowToFullSize() {
+        guard let window = compactWindow else {
+            // No existing window, create a new full-size one
+            createFullSizeFloatingWindow()
+            return
+        }
+
+        // Update existing window to full size and content
+        let currentFrame = window.frame
+        let newFrame = NSRect(
+            x: currentFrame.origin.x,
+            y: currentFrame.origin.y - (500 - currentFrame.height), // Adjust position for height change
+            width: 450,
+            height: 500
+        )
+
+        window.setFrame(newFrame, display: true, animate: true)
+
+        // Update content to full ContentView
+        window.contentViewController = NSHostingController(
+            rootView: ContentView(pingService: pingService)
+        )
+    }
+
+    private func createFullSizeFloatingWindow() {
+        compactWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 450, height: 500),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+
+        guard let window = compactWindow else { return }
+
+        window.contentViewController = NSHostingController(
+            rootView: ContentView(pingService: pingService)
+        )
+        window.delegate = self
+
+        // Position window
+        if let button = statusItem?.button {
+            let buttonFrame = button.window?.convertToScreen(button.frame) ?? NSRect.zero
+            let windowOrigin = NSPoint(
+                x: buttonFrame.midX - 225,
+                y: buttonFrame.minY - 520
+            )
+            window.setFrameOrigin(windowOrigin)
+        } else {
+            window.center()
+        }
+
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces]
+        window.isMovableByWindowBackground = true
+
+        // Prevent all fullscreen behaviors
+        window.collectionBehavior.remove(.fullScreenPrimary)
+        window.collectionBehavior.remove(.fullScreenAuxiliary)
+        if window.responds(to: #selector(NSWindow.toggleFullScreen(_:))) {
+            window.collectionBehavior.insert(.fullScreenDisallowsTiling)
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func hideCompactFloatingWindow() {
+        if let window = compactWindow {
+            window.delegate = nil
+            window.close()
+        }
+        compactWindow = nil
+        isRecreatingWindow = false
+    }
+
+    private func updateWindowStayOnTop(stayOnTop: Bool) {
+        // Simple approach: close all windows and recreate if needed
+        closeAllFloatingWindows()
+
+        if stayOnTop && pingService.isCompactMode {
+            // Only create floating window if both stay-on-top AND compact are enabled
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.createSimpleFloatingWindow(isCompact: true)
+            }
+        } else if stayOnTop && !pingService.isCompactMode {
+            // Create full-size floating window for stay-on-top only
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.createSimpleFloatingWindow(isCompact: false)
+            }
+        } else {
+            // Use popover for normal mode
+            updatePopoverSize()
+        }
+    }
+
+    private func updatePopoverSize() {
+        if pingService.isCompactMode {
+            popover.contentSize = NSSize(width: 280, height: 220)
+        } else {
+            popover.contentSize = NSSize(width: 450, height: 500)
+        }
+    }
+
+    private func closeAllFloatingWindows() {
+        if let window = compactWindow {
+            window.delegate = nil
+            window.close()
+        }
+        compactWindow = nil
+        isRecreatingWindow = false
+    }
+
+    private func createSimpleFloatingWindow(isCompact: Bool) {
+        // Ensure clean state
+        closeAllFloatingWindows()
+
+        let size = isCompact ? NSSize(width: 280, height: 220) : NSSize(width: 450, height: 500)
+
+        compactWindow = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless], // Always borderless for floating windows
+            backing: .buffered,
+            defer: false
+        )
+
+        guard let window = compactWindow else { return }
+
+        // Set content
+        if isCompact {
+            window.contentViewController = NSHostingController(
+                rootView: CompactView(pingService: pingService, showingSettings: .constant(false))
+            )
+        } else {
+            window.contentViewController = NSHostingController(
+                rootView: ContentView(pingService: pingService)
+            )
+        }
+
+        window.delegate = self
+
+        // Position window
+        if let button = statusItem?.button {
+            let buttonFrame = button.window?.convertToScreen(button.frame) ?? NSRect.zero
+            let windowOrigin = NSPoint(
+                x: buttonFrame.midX - size.width / 2,
+                y: buttonFrame.minY - size.height - 20
+            )
+            window.setFrameOrigin(windowOrigin)
+        } else {
+            window.center()
+        }
+
+        // Configure for stay-on-top
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces]
+        window.isMovableByWindowBackground = true
+
+        // Prevent fullscreen completely
+        window.collectionBehavior.remove(.fullScreenPrimary)
+        window.collectionBehavior.remove(.fullScreenAuxiliary)
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func recreateWindowWithBorderlessStyle() {
+        guard let oldWindow = compactWindow, !isRecreatingWindow else { return }
+        isRecreatingWindow = true
+
+        let frame = oldWindow.frame
+        oldWindow.close()
+
+        compactWindow = NSWindow(
+            contentRect: frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+
+        guard let window = compactWindow else {
+            isRecreatingWindow = false
+            return
+        }
+
+        setupWindowContent()
+        window.setFrame(frame, display: true)
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces]
+
+        // Prevent all fullscreen behaviors
+        window.collectionBehavior.remove(.fullScreenPrimary)
+        window.collectionBehavior.remove(.fullScreenAuxiliary)
+        if window.responds(to: #selector(NSWindow.toggleFullScreen(_:))) {
+            window.collectionBehavior.insert(.fullScreenDisallowsTiling)
+        }
+
+        // Enable dragging for borderless windows
+        window.isMovableByWindowBackground = true
+
+        window.makeKeyAndOrderFront(nil)
+        isRecreatingWindow = false
+    }
+
+    private func recreateWindowWithTitleBar() {
+        guard let oldWindow = compactWindow, !isRecreatingWindow else { return }
+        isRecreatingWindow = true
+
+        let frame = oldWindow.frame
+        oldWindow.close()
+
+        compactWindow = NSWindow(
+            contentRect: frame,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+
+        guard let window = compactWindow else {
+            isRecreatingWindow = false
+            return
+        }
+
+        setupWindowContent()
+        window.title = "PingMonitor - Compact"
+        window.setFrame(frame, display: true)
+        window.level = .normal
+        window.collectionBehavior = [.canJoinAllSpaces]
+
+        // Prevent all fullscreen behaviors
+        window.collectionBehavior.remove(.fullScreenPrimary)
+        window.collectionBehavior.remove(.fullScreenAuxiliary)
+        if window.responds(to: #selector(NSWindow.toggleFullScreen(_:))) {
+            window.collectionBehavior.insert(.fullScreenDisallowsTiling)
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        isRecreatingWindow = false
+    }
+
+    private func setupWindowContent() {
+        guard let window = compactWindow else { return }
+
+        window.contentViewController = NSHostingController(
+            rootView: CompactView(pingService: pingService, showingSettings: .constant(false))
+        )
+        window.delegate = self
+    }
+
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === compactWindow {
+            compactWindow = nil
+            pingService.isCompactMode = false
+        }
     }
 }
 
