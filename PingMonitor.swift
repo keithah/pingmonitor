@@ -80,9 +80,37 @@ enum PingStatus {
         case .good: return .green
         case .warning: return .yellow
         case .error: return .red
-        case .timeout: return .gray
+        case .timeout: return .black
         }
     }
+}
+
+enum PingType: String, CaseIterable, Codable {
+    case icmp = "ICMP"
+    case udp = "UDP"
+    case tcp = "TCP"
+
+    var description: String {
+        switch self {
+        case .icmp: return "ICMP (Traditional ping)"
+        case .udp: return "UDP (User Datagram Protocol)"
+        case .tcp: return "TCP (Transmission Control Protocol)"
+        }
+    }
+}
+
+enum GatewayMode: String, CaseIterable, Codable {
+    case discovered = "Auto-discovered"
+    case manual = "Manual Entry"
+}
+
+struct PingSettings: Codable {
+    var interval: Double = 2.0 // seconds
+    var timeout: Double = 3.0 // seconds
+    var type: PingType = .icmp
+    var goodThreshold: Double = 50.0 // ms
+    var warningThreshold: Double = 200.0 // ms
+    var port: Int? = nil // for UDP/TCP pings
 }
 
 struct Host: Identifiable, Codable {
@@ -91,6 +119,7 @@ struct Host: Identifiable, Codable {
     var address: String
     var isActive: Bool = false
     var isDefault: Bool = false
+    var pingSettings: PingSettings = PingSettings()
 
     init(name: String, address: String, isActive: Bool = false, isDefault: Bool = false) {
         self.id = UUID()
@@ -98,6 +127,7 @@ struct Host: Identifiable, Codable {
         self.address = address
         self.isActive = isActive
         self.isDefault = isDefault
+        self.pingSettings = PingSettings()
     }
 }
 
@@ -156,7 +186,7 @@ class PingService: ObservableObject {
     func startPinging(host: Host) {
         timers[host.address]?.invalidate()
 
-        timers[host.address] = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+        timers[host.address] = Timer.scheduledTimer(withTimeInterval: host.pingSettings.interval, repeats: true) { _ in
             self.performPing(host: host)
         }
 
@@ -176,58 +206,126 @@ class PingService: ObservableObject {
 
     private func performPing(host: Host) {
         DispatchQueue.global(qos: .background).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/sbin/ping")
-            process.arguments = ["-c", "1", "-t", "3", host.address]
+            let result: PingResult
 
-            let pipe = Pipe()
-            process.standardOutput = pipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let result: PingResult
-                if process.terminationStatus == 0 {
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? ""
-
-                    if let pingTime = self.extractPingTime(from: output) {
-                        let status: PingStatus = pingTime < 50 ? .good : pingTime < 150 ? .warning : .error
-                        result = PingResult(host: host.address, pingTime: pingTime, status: status)
-                    } else {
-                        result = PingResult(host: host.address, pingTime: nil, status: .timeout)
-                    }
-                } else {
-                    result = PingResult(host: host.address, pingTime: nil, status: .error)
-                }
-
-                DispatchQueue.main.async {
-                    self.pingHistory.insert(result, at: 0)
-                    if self.pingHistory.count > 100 {
-                        self.pingHistory.removeLast()
-                    }
-
-                    // Store latest result for each host
-                    self.hostLatestResults[host.address] = result
-
-                    if host.isActive || self.currentHost?.address == host.address {
-                        self.latestResult = result
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    let result = PingResult(host: host.address, pingTime: nil, status: .error)
-                    self.pingHistory.insert(result, at: 0)
-
-                    // Store latest result for each host
-                    self.hostLatestResults[host.address] = result
-
-                    if host.isActive || self.currentHost?.address == host.address {
-                        self.latestResult = result
-                    }
-                }
+            switch host.pingSettings.type {
+            case .icmp:
+                result = self.performICMPPing(host: host)
+            case .udp:
+                result = self.performUDPPing(host: host)
+            case .tcp:
+                result = self.performTCPPing(host: host)
             }
+
+            DispatchQueue.main.async {
+                self.addPingResult(result, for: host)
+            }
+        }
+    }
+
+    private func addPingResult(_ result: PingResult, for host: Host) {
+        self.pingHistory.insert(result, at: 0)
+        if self.pingHistory.count > 100 {
+            self.pingHistory.removeLast()
+        }
+
+        // Store latest result for each host
+        self.hostLatestResults[host.address] = result
+
+        if host.isActive || self.currentHost?.address == host.address {
+            self.latestResult = result
+        }
+    }
+
+    private func determineStatus(pingTime: Double, settings: PingSettings) -> PingStatus {
+        if pingTime < settings.goodThreshold {
+            return .good
+        } else if pingTime < settings.warningThreshold {
+            return .warning
+        } else {
+            return .error
+        }
+    }
+
+    private func performICMPPing(host: Host) -> PingResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/sbin/ping")
+        process.arguments = ["-c", "1", "-t", String(Int(host.pingSettings.timeout)), host.address]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            if process.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                if let pingTime = self.extractPingTime(from: output) {
+                    let status = self.determineStatus(pingTime: pingTime, settings: host.pingSettings)
+                    return PingResult(host: host.address, pingTime: pingTime, status: status)
+                } else {
+                    return PingResult(host: host.address, pingTime: nil, status: .timeout)
+                }
+            } else {
+                return PingResult(host: host.address, pingTime: nil, status: .error)
+            }
+        } catch {
+            return PingResult(host: host.address, pingTime: nil, status: .error)
+        }
+    }
+
+    private func performUDPPing(host: Host) -> PingResult {
+        let port = host.pingSettings.port ?? 53 // Default to DNS port
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+        process.arguments = ["-u", "-z", "-w", String(Int(host.pingSettings.timeout)), host.address, String(port)]
+
+        let startTime = Date()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            let endTime = Date()
+            let pingTime = endTime.timeIntervalSince(startTime) * 1000 // Convert to ms
+
+            if process.terminationStatus == 0 {
+                let status = self.determineStatus(pingTime: pingTime, settings: host.pingSettings)
+                return PingResult(host: host.address, pingTime: pingTime, status: status)
+            } else {
+                return PingResult(host: host.address, pingTime: nil, status: .timeout)
+            }
+        } catch {
+            return PingResult(host: host.address, pingTime: nil, status: .error)
+        }
+    }
+
+    private func performTCPPing(host: Host) -> PingResult {
+        let port = host.pingSettings.port ?? 80 // Default to HTTP port
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+        process.arguments = ["-z", "-w", String(Int(host.pingSettings.timeout)), host.address, String(port)]
+
+        let startTime = Date()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            let endTime = Date()
+            let pingTime = endTime.timeIntervalSince(startTime) * 1000 // Convert to ms
+
+            if process.terminationStatus == 0 {
+                let status = self.determineStatus(pingTime: pingTime, settings: host.pingSettings)
+                return PingResult(host: host.address, pingTime: pingTime, status: status)
+            } else {
+                return PingResult(host: host.address, pingTime: nil, status: .timeout)
+            }
+        } catch {
+            return PingResult(host: host.address, pingTime: nil, status: .error)
         }
     }
 
@@ -266,6 +364,7 @@ struct ContentView: View {
     @State private var showingSettings = false
     @State private var showingExport = false
     @State private var selectedTimeFilter: TimeFilter = .fiveMinutes
+    @State private var showingDetailedStats = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -276,7 +375,7 @@ struct ContentView: View {
             historySection
             Divider()
         }
-        .frame(width: 450, height: 500)
+        .frame(width: 450, height: showingDetailedStats ? 620 : 500)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             updateActiveHost(selectedHostIndex)
@@ -300,6 +399,38 @@ struct ContentView: View {
         }
     }
 
+    private func formatDouble(_ value: Double, decimals: Int) -> String {
+        guard value.isFinite && !value.isNaN else { return "0.000" }
+        return String(format: "%.*f", decimals, value)
+    }
+
+    private var pingStatistics: (transmitted: Int, received: Int, packetLoss: Double, min: Double, avg: Double, max: Double, stddev: Double) {
+        let successfulPings = filteredHistory.compactMap { $0.pingTime }
+        let totalPings = filteredHistory.count
+        let receivedPings = successfulPings.count
+
+        // Handle case with no pings at all
+        guard totalPings > 0 else {
+            return (transmitted: 0, received: 0, packetLoss: 0.0, min: 0, avg: 0, max: 0, stddev: 0)
+        }
+
+        // Handle case with pings but no successful ones
+        guard !successfulPings.isEmpty else {
+            return (transmitted: totalPings, received: 0, packetLoss: 100.0, min: 0, avg: 0, max: 0, stddev: 0)
+        }
+
+        let packetLoss = Double(totalPings - receivedPings) / Double(totalPings) * 100.0
+        let minPing = successfulPings.min() ?? 0
+        let maxPing = successfulPings.max() ?? 0
+        let avgPing = successfulPings.reduce(0, +) / Double(successfulPings.count)
+
+        // Calculate standard deviation with safety check
+        let variance = successfulPings.map { pow($0 - avgPing, 2) }.reduce(0, +) / Double(successfulPings.count)
+        let stddev = variance.isFinite ? sqrt(variance) : 0.0
+
+        return (transmitted: totalPings, received: receivedPings, packetLoss: packetLoss, min: minPing, avg: avgPing, max: maxPing, stddev: stddev)
+    }
+
     private var hostTabsSection: some View {
         VStack(spacing: 0) {
             HStack {
@@ -321,9 +452,6 @@ struct ContentView: View {
                     Menu {
                         Button("Settings") {
                             showingSettings = true
-                        }
-                        Button("Export Data") {
-                            showingExport = true
                         }
                         Divider()
                         Button("Quit") {
@@ -435,12 +563,25 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                Button(action: {}) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption)
-                        .foregroundColor(.blue)
+                HStack(spacing: 8) {
+                    Button(action: {
+                        showingDetailedStats.toggle()
+                    }) {
+                        Image(systemName: showingDetailedStats ? "info.circle.fill" : "info.circle")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    Button(action: {
+                        showingExport = true
+                    }) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, 16)
 
@@ -479,6 +620,10 @@ struct ContentView: View {
                 }
             }
             .frame(height: 160)
+
+            if showingDetailedStats {
+                detailedStatsSection
+            }
         }
         .padding(.vertical, 8)
     }
@@ -503,6 +648,39 @@ struct ContentView: View {
             return result.status.swiftUIColor
         }
         return .gray
+    }
+
+    private var detailedStatsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            let stats = pingStatistics
+            let currentHost = selectedHostIndex < pingService.hosts.count ? pingService.hosts[selectedHostIndex] : nil
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("--- \(currentHost?.address ?? "unknown") ping statistics ---")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.primary)
+
+                Text("\(stats.transmitted) transmitted, \(stats.received) received, \(formatDouble(stats.packetLoss, decimals: 1))% packet loss")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.primary)
+
+                if stats.received > 0 {
+                    Text("RTT min/avg/max/stddev = \(formatDouble(stats.min, decimals: 3))/\(formatDouble(stats.avg, decimals: 3))/\(formatDouble(stats.max, decimals: 3))/\(formatDouble(stats.stddev, decimals: 3)) ms")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.primary)
+                } else {
+                    Text("No successful pings yet")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.orange)
+                }
+            }
+            .padding(12)
+            .background(Color(NSColor.controlBackgroundColor))
+            .cornerRadius(8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .id(pingService.pingHistory.count) // Force refresh when ping data changes
     }
 }
 
@@ -669,6 +847,14 @@ struct SettingsView: View {
     @State private var newHostAddress = ""
     @State private var errorMessage = ""
     @State private var showError = false
+    @State private var editingPingType: PingType = .icmp
+    @State private var editingInterval: Double = 2.0
+    @State private var editingTimeout: Double = 3.0
+    @State private var editingGoodThreshold: Double = 50.0
+    @State private var editingWarningThreshold: Double = 200.0
+    @State private var editingPort: String = ""
+    @State private var gatewayMode: GatewayMode = .discovered
+    @State private var manualGatewayAddress: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -826,6 +1012,7 @@ struct SettingsView: View {
         )
     }
 
+
     private var bottomButtons: some View {
         HStack {
             Button("Reset to Defaults") {
@@ -881,49 +1068,177 @@ struct SettingsView: View {
     }
 
     private func editHostSheet(host: Host) -> some View {
-        VStack(spacing: 20) {
-            Text("Edit Host")
-                .font(.headline)
-                .fontWeight(.semibold)
+        ScrollView {
+            VStack(spacing: 20) {
+                Text("Edit Host")
+                    .font(.headline)
+                    .fontWeight(.semibold)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Host Name")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                TextField("Host name", text: .init(
-                    get: { newHostName.isEmpty ? host.name : newHostName },
-                    set: { newHostName = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 16) {
+                    // Basic Info Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Basic Information")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
 
-                Text("IP Address or Hostname")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                TextField("IP address", text: .init(
-                    get: { newHostAddress.isEmpty ? host.address : newHostAddress },
-                    set: { newHostAddress = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-            }
+                        Text("Host Name")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        TextField("Host name", text: .init(
+                            get: { newHostName.isEmpty ? host.name : newHostName },
+                            set: { newHostName = $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
 
-            HStack(spacing: 12) {
-                Button("Cancel") {
-                    resetAddHostForm()
-                    editingHost = nil
+                        if host.name == "Default Gateway" {
+                            Text("Gateway Mode")
+                                .font(.caption)
+                                .fontWeight(.medium)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button(action: { gatewayMode = .discovered }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: gatewayMode == .discovered ? "checkmark.circle.fill" : "circle")
+                                            .foregroundColor(gatewayMode == .discovered ? .blue : .secondary)
+                                        Text("Automatic Discovery")
+                                            .font(.caption)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+
+                                Button(action: { gatewayMode = .manual }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: gatewayMode == .manual ? "checkmark.circle.fill" : "circle")
+                                            .foregroundColor(gatewayMode == .manual ? .blue : .secondary)
+                                        Text("Manual Entry")
+                                            .font(.caption)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        Text("IP Address or Hostname")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        TextField("IP address", text: .init(
+                            get: { newHostAddress.isEmpty ? host.address : newHostAddress },
+                            set: { newHostAddress = $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(host.name == "Default Gateway" && gatewayMode == .discovered)
+                        .opacity(host.name == "Default Gateway" && gatewayMode == .discovered ? 0.6 : 1.0)
+                    }
+
+                    Divider()
+
+                    // Ping Configuration Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Ping Configuration")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+
+                        Text("Ping Type")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Picker("Ping Type", selection: $editingPingType) {
+                            ForEach(PingType.allCases, id: \.self) { type in
+                                Text(type.description).tag(type)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text("Interval (seconds)")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                TextField("2.0", value: $editingInterval, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+
+                            VStack(alignment: .leading) {
+                                Text("Timeout (seconds)")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                TextField("3.0", value: $editingTimeout, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+
+                        if editingPingType != .icmp {
+                            Text("Port (optional)")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            TextField(editingPingType == .udp ? "53 (DNS)" : "80 (HTTP)", text: $editingPort)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    Divider()
+
+                    // Thresholds Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Response Time Thresholds (ms)")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text("Good (Green)")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.green)
+                                TextField("50.0", value: $editingGoodThreshold, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+
+                            VStack(alignment: .leading) {
+                                Text("Warning (Yellow)")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.orange)
+                                TextField("200.0", value: $editingWarningThreshold, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+
+                        Text("Above warning threshold = Error (Red)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
-                .buttonStyle(.bordered)
 
-                Button("Save Changes") {
-                    saveHostChanges(host)
+                HStack(spacing: 12) {
+                    Button("Cancel") {
+                        resetAddHostForm()
+                        editingHost = nil
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Save Changes") {
+                        saveHostChanges(host)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding(20)
-        .frame(width: 400, height: 250)
+        .frame(width: 450, height: 600)
         .onAppear {
             newHostName = host.name
             newHostAddress = host.address
+            editingPingType = host.pingSettings.type
+            editingInterval = host.pingSettings.interval
+            editingTimeout = host.pingSettings.timeout
+            editingGoodThreshold = host.pingSettings.goodThreshold
+            editingWarningThreshold = host.pingSettings.warningThreshold
+            editingPort = host.pingSettings.port?.description ?? ""
+
+            // Initialize gateway mode for Default Gateway host
+            if host.name == "Default Gateway" {
+                gatewayMode = .discovered // Default to discovered mode
+            }
         }
     }
 
@@ -962,8 +1277,32 @@ struct SettingsView: View {
             return
         }
 
+        // Update basic info
         pingService.hosts[index].name = updatedName
         pingService.hosts[index].address = updatedAddress
+
+        // Update ping settings
+        var newSettings = pingService.hosts[index].pingSettings
+        newSettings.type = editingPingType
+        newSettings.interval = editingInterval
+        newSettings.timeout = editingTimeout
+        newSettings.goodThreshold = editingGoodThreshold
+        newSettings.warningThreshold = editingWarningThreshold
+
+        // Handle port setting
+        if !editingPort.isEmpty, let port = Int(editingPort) {
+            newSettings.port = port
+        } else {
+            newSettings.port = nil
+        }
+
+        pingService.hosts[index].pingSettings = newSettings
+
+        // Restart pinging with new settings if this host is being monitored
+        if pingService.hosts[index].isActive {
+            pingService.stopPinging()
+            pingService.startPingingAllHosts(pingService.hosts)
+        }
 
         resetAddHostForm()
         editingHost = nil
@@ -1420,10 +1759,6 @@ class MenuBarController: ObservableObject {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        let exportItem = NSMenuItem(title: "Export Data", action: #selector(showExport), keyEquivalent: "")
-        exportItem.target = self
-        menu.addItem(exportItem)
-
         menu.addItem(NSMenuItem.separator())
 
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "")
@@ -1474,21 +1809,6 @@ class MenuBarController: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc private func showExport() {
-        let exportWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        exportWindow.title = "Export Data"
-        exportWindow.contentViewController = NSHostingController(
-            rootView: ExportView(pingService: pingService)
-        )
-        exportWindow.center()
-        exportWindow.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
 
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
