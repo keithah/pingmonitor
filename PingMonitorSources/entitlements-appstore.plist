@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Store Sandbox Required -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Network Access Required for Ping Operations -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Allow user to select files for export -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- App Store specific: NO JIT, NO unsigned executable memory -->
+    <!-- These are automatically false in App Store builds, but explicit is better -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+    <key>com.apple.security.cs.disable-executable-page-protection</key>
+    <false/>
+</dict>
+</plist>

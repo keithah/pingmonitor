@@ -7,42 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1A1A1A12B3C4D5E6F7A8B9C /* PingMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1A02B3C4D5E6F7A8B9C /* PingMonitorApp.swift */; };
-		A1A1A1A22B3C4D5E6F7A8B9C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1A12B3C4D5E6F7A8B9C /* ContentView.swift */; };
-		A1A1A1A32B3C4D5E6F7A8B9C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1A1A1A22B3C4D5E6F7A8B9C /* Assets.xcassets */; };
-		A1A1A1A42B3C4D5E6F7A8B9C /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1A1A1A32B3C4D5E6F7A8B9C /* Preview Assets.xcassets */; };
-		A1A1A1A52B3C4D5E6F7A8B9C /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1A42B3C4D5E6F7A8B9C /* MenuBarController.swift */; };
-		A1A1A1A62B3C4D5E6F7A8B9C /* PingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1A52B3C4D5E6F7A8B9C /* PingService.swift */; };
-		A1A1A1A72B3C4D5E6F7A8B9C /* PingResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1A62B3C4D5E6F7A8B9C /* PingResult.swift */; };
-		A1A1A1A82B3C4D5E6F7A8B9C /* Host.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1A72B3C4D5E6F7A8B9C /* Host.swift */; };
-		A1A1A1A92B3C4D5E6F7A8B9C /* HostTabsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1A82B3C4D5E6F7A8B9C /* HostTabsView.swift */; };
-		A1A1A1AA2B3C4D5E6F7A8B9C /* PingGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1A92B3C4D5E6F7A8B9C /* PingGraphView.swift */; };
-		A1A1A1AB2B3C4D5E6F7A8B9C /* HistoryTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1AA2B3C4D5E6F7A8B9C /* HistoryTableView.swift */; };
-		A1A1A1AC2B3C4D5E6F7A8B9C /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1AB2B3C4D5E6F7A8B9C /* SettingsView.swift */; };
-		A1A1A1AD2B3C4D5E6F7A8B9C /* DataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A1A1AC2B3C4D5E6F7A8B9C /* DataManager.swift */; };
+		1E000001291F00000000000 /* PingMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E000000291F00000000000 /* PingMonitor.swift */; };
+		1E000003291F00000000000 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1E000002291F00000000000 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A1A1A1902B3C4D5E6F7A8B9C /* PingMonitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PingMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A1A1A1A02B3C4D5E6F7A8B9C /* PingMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PingMonitorApp.swift; sourceTree = "<group>"; };
-		A1A1A1A12B3C4D5E6F7A8B9C /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		A1A1A1A22B3C4D5E6F7A8B9C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A1A1A1A32B3C4D5E6F7A8B9C /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
-		A1A1A1A42B3C4D5E6F7A8B9C /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
-		A1A1A1A52B3C4D5E6F7A8B9C /* PingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PingService.swift; sourceTree = "<group>"; };
-		A1A1A1A62B3C4D5E6F7A8B9C /* PingResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PingResult.swift; sourceTree = "<group>"; };
-		A1A1A1A72B3C4D5E6F7A8B9C /* Host.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Host.swift; sourceTree = "<group>"; };
-		A1A1A1A82B3C4D5E6F7A8B9C /* HostTabsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostTabsView.swift; sourceTree = "<group>"; };
-		A1A1A1A92B3C4D5E6F7A8B9C /* PingGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PingGraphView.swift; sourceTree = "<group>"; };
-		A1A1A1AA2B3C4D5E6F7A8B9C /* HistoryTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryTableView.swift; sourceTree = "<group>"; };
-		A1A1A1AB2B3C4D5E6F7A8B9C /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		A1A1A1AC2B3C4D5E6F7A8B9C /* DataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataManager.swift; sourceTree = "<group>"; };
-		A1A1A1AF2B3C4D5E6F7A8B9C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A1A1A1B02B3C4D5E6F7A8B9C /* PingMonitor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PingMonitor.entitlements; sourceTree = "<group>"; };
+		1E0000FF291F00000000000 /* PingMonitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PingMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1E000000291F00000000000 /* PingMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PingMonitor.swift; sourceTree = "<group>"; };
+		1E000002291F00000000000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1E000004291F00000000000 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1E000005291F00000000000 /* entitlements-appstore.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "entitlements-appstore.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A1A1A18D2B3C4D5E6F7A8B9C /* Frameworks */ = {
+		1E0000FC291F00000000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -52,86 +30,43 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A1A1A1872B3C4D5E6F7A8B9C = {
+		1E0000F6291F00000000000 = {
 			isa = PBXGroup;
 			children = (
-				A1A1A1922B3C4D5E6F7A8B9C /* PingMonitor */,
-				A1A1A1912B3C4D5E6F7A8B9C /* Products */,
+				1E000001291F00000000001 /* PingMonitor */,
+				1E000100291F00000000000 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		A1A1A1912B3C4D5E6F7A8B9C /* Products */ = {
+		1E000001291F00000000001 /* PingMonitor */ = {
 			isa = PBXGroup;
 			children = (
-				A1A1A1902B3C4D5E6F7A8B9C /* PingMonitor.app */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		A1A1A1922B3C4D5E6F7A8B9C /* PingMonitor */ = {
-			isa = PBXGroup;
-			children = (
-				A1A1A1A02B3C4D5E6F7A8B9C /* PingMonitorApp.swift */,
-				A1A1A1A12B3C4D5E6F7A8B9C /* ContentView.swift */,
-				A1A1A1A42B3C4D5E6F7A8B9C /* MenuBarController.swift */,
-				A1A1A1B12B3C4D5E6F7A8B9C /* Models */,
-				A1A1A1B22B3C4D5E6F7A8B9C /* Services */,
-				A1A1A1B32B3C4D5E6F7A8B9C /* Views */,
-				A1A1A1A22B3C4D5E6F7A8B9C /* Assets.xcassets */,
-				A1A1A1AF2B3C4D5E6F7A8B9C /* Info.plist */,
-				A1A1A1B02B3C4D5E6F7A8B9C /* PingMonitor.entitlements */,
-				A1A1A1942B3C4D5E6F7A8B9C /* Preview Content */,
+				1E000000291F00000000000 /* PingMonitor.swift */,
+				1E000002291F00000000000 /* Assets.xcassets */,
+				1E000004291F00000000000 /* Info.plist */,
+				1E000005291F00000000000 /* entitlements-appstore.plist */,
 			);
 			path = PingMonitor;
 			sourceTree = "<group>";
 		};
-		A1A1A1942B3C4D5E6F7A8B9C /* Preview Content */ = {
+		1E000100291F00000000000 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A1A1A1A32B3C4D5E6F7A8B9C /* Preview Assets.xcassets */,
+				1E0000FF291F00000000000 /* PingMonitor.app */,
 			);
-			path = "Preview Content";
-			sourceTree = "<group>";
-		};
-		A1A1A1B12B3C4D5E6F7A8B9C /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				A1A1A1A62B3C4D5E6F7A8B9C /* PingResult.swift */,
-				A1A1A1A72B3C4D5E6F7A8B9C /* Host.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
-		A1A1A1B22B3C4D5E6F7A8B9C /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				A1A1A1A52B3C4D5E6F7A8B9C /* PingService.swift */,
-				A1A1A1AC2B3C4D5E6F7A8B9C /* DataManager.swift */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
-		A1A1A1B32B3C4D5E6F7A8B9C /* Views */ = {
-			isa = PBXGroup;
-			children = (
-				A1A1A1A82B3C4D5E6F7A8B9C /* HostTabsView.swift */,
-				A1A1A1A92B3C4D5E6F7A8B9C /* PingGraphView.swift */,
-				A1A1A1AA2B3C4D5E6F7A8B9C /* HistoryTableView.swift */,
-				A1A1A1AB2B3C4D5E6F7A8B9C /* SettingsView.swift */,
-			);
-			path = Views;
+			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A1A1A18F2B3C4D5E6F7A8B9C /* PingMonitor */ = {
+		1E0000FE291F00000000000 /* PingMonitor */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A1A1A1A82B3C4D5E6F7A8B9C /* Build configuration list for PBXNativeTarget "PingMonitor" */;
+			buildConfigurationList = 1E000007291F00000000000 /* Build configuration list for PBXNativeTarget "PingMonitor" */;
 			buildPhases = (
-				A1A1A18C2B3C4D5E6F7A8B9C /* Sources */,
-				A1A1A18D2B3C4D5E6F7A8B9C /* Frameworks */,
-				A1A1A18E2B3C4D5E6F7A8B9C /* Resources */,
+				1E0000FB291F00000000000 /* Sources */,
+				1E0000FC291F00000000000 /* Frameworks */,
+				1E0000FD291F00000000000 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -139,25 +74,25 @@
 			);
 			name = PingMonitor;
 			productName = PingMonitor;
-			productReference = A1A1A1902B3C4D5E6F7A8B9C /* PingMonitor.app */;
+			productReference = 1E0000FF291F00000000000 /* PingMonitor.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		A1A1A1882B3C4D5E6F7A8B9C /* Project object */ = {
+		1E0000F7291F00000000000 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1430;
-				LastUpgradeCheck = 1430;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
 				TargetAttributes = {
-					A1A1A18F2B3C4D5E6F7A8B9C = {
-						CreatedOnToolsVersion = 14.3;
+					1E0000FE291F00000000000 = {
+						CreatedOnToolsVersion = 15.0;
 					};
 				};
 			};
-			buildConfigurationList = A1A1A18B2B3C4D5E6F7A8B9C /* Build configuration list for PBXProject "PingMonitor" */;
+			buildConfigurationList = 1E0000FA291F00000000000 /* Build configuration list for PBXProject "PingMonitor" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -165,54 +100,44 @@
 				en,
 				Base,
 			);
-			mainGroup = A1A1A1872B3C4D5E6F7A8B9C;
-			productRefGroup = A1A1A1912B3C4D5E6F7A8B9C /* Products */;
+			mainGroup = 1E0000F6291F00000000000;
+			productRefGroup = 1E000100291F00000000000 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A1A1A18F2B3C4D5E6F7A8B9C /* PingMonitor */,
+				1E0000FE291F00000000000 /* PingMonitor */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A1A1A18E2B3C4D5E6F7A8B9C /* Resources */ = {
+		1E0000FD291F00000000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1A1A1A42B3C4D5E6F7A8B9C /* Preview Assets.xcassets in Resources */,
-				A1A1A1A32B3C4D5E6F7A8B9C /* Assets.xcassets in Resources */,
+				1E000003291F00000000000 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A1A1A18C2B3C4D5E6F7A8B9C /* Sources */ = {
+		1E0000FB291F00000000000 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1A1A1A22B3C4D5E6F7A8B9C /* ContentView.swift in Sources */,
-				A1A1A1A12B3C4D5E6F7A8B9C /* PingMonitorApp.swift in Sources */,
-				A1A1A1A52B3C4D5E6F7A8B9C /* MenuBarController.swift in Sources */,
-				A1A1A1A62B3C4D5E6F7A8B9C /* PingService.swift in Sources */,
-				A1A1A1A72B3C4D5E6F7A8B9C /* PingResult.swift in Sources */,
-				A1A1A1A82B3C4D5E6F7A8B9C /* Host.swift in Sources */,
-				A1A1A1A92B3C4D5E6F7A8B9C /* HostTabsView.swift in Sources */,
-				A1A1A1AA2B3C4D5E6F7A8B9C /* PingGraphView.swift in Sources */,
-				A1A1A1AB2B3C4D5E6F7A8B9C /* HistoryTableView.swift in Sources */,
-				A1A1A1AC2B3C4D5E6F7A8B9C /* SettingsView.swift in Sources */,
-				A1A1A1AD2B3C4D5E6F7A8B9C /* DataManager.swift in Sources */,
+				1E000001291F00000000000 /* PingMonitor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		A1A1A1A62B3C4D5E6F7A8B9C /* Debug */ = {
+		1E000008291F00000000000 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -245,7 +170,8 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
@@ -259,20 +185,22 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
 		};
-		A1A1A1A72B3C4D5E6F7A8B9C /* Release */ = {
+		1E000009291F00000000000 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -305,7 +233,8 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
@@ -313,63 +242,67 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
 			name = Release;
 		};
-		A1A1A1A92B3C4D5E6F7A8B9C /* Debug */ = {
+		1E00000A291F00000000000 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = PingMonitor/PingMonitor.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "entitlements-appstore.plist";
 				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"PingMonitor/Preview Content\"";
+				DEVELOPMENT_TEAM = 6R7S5GA944;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PingMonitor/Info.plist;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PingMonitor;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2024 Keith Herrington. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.PingMonitor;
+				MARKETING_VERSION = 0.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pingmonitor.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
-		A1A1A1AA2B3C4D5E6F7A8B9C /* Release */ = {
+		1E00000B291F00000000000 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = PingMonitor/PingMonitor.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "entitlements-appstore.plist";
 				CODE_SIGN_STYLE = Automatic;
-				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_ASSET_PATHS = "\"PingMonitor/Preview Content\"";
+				DEVELOPMENT_TEAM = 6R7S5GA944;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PingMonitor/Info.plist;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = PingMonitor;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2024 Keith Herrington. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.PingMonitor;
+				MARKETING_VERSION = 0.1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pingmonitor.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -379,25 +312,25 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A1A1A18B2B3C4D5E6F7A8B9C /* Build configuration list for PBXProject "PingMonitor" */ = {
+		1E0000FA291F00000000000 /* Build configuration list for PBXProject "PingMonitor" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				A1A1A1A62B3C4D5E6F7A8B9C /* Debug */,
-				A1A1A1A72B3C4D5E6F7A8B9C /* Release */,
+				1E000008291F00000000000 /* Debug */,
+				1E000009291F00000000000 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A1A1A1A82B3C4D5E6F7A8B9C /* Build configuration list for PBXNativeTarget "PingMonitor" */ = {
+		1E000007291F00000000000 /* Build configuration list for PBXNativeTarget "PingMonitor" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				A1A1A1A92B3C4D5E6F7A8B9C /* Debug */,
-				A1A1A1AA2B3C4D5E6F7A8B9C /* Release */,
+				1E00000A291F00000000000 /* Debug */,
+				1E00000B291F00000000000 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = A1A1A1882B3C4D5E6F7A8B9C /* Project object */;
+	rootObject = 1E0000F7291F00000000000 /* Project object */;
 }

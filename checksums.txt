@@ -1,0 +1,2 @@
+3cffbec42f899004d662b6813473e00f961cb2674c9d4b576d31fd3e8b88932c  PingMonitor-0.1.1-signed.dmg
+82b25f8d2da9511660a9066ca9c2e4a6602b8dfd428cfce3b7cdf14bfcfceda3  PingMonitor-0.1.1-signed.pkg
