@@ -26,7 +26,7 @@
     <!-- App Groups for widget data sharing -->
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>group.com.pingmonitor.shared</string>
+        <string>group.com.hadm.pingmonitor.shared</string>
     </array>
 </dict>
 </plist>

@@ -10,7 +10,7 @@ on:
 
 env:
   PRODUCT_NAME: "PingMonitor"
-  BUNDLE_ID: "com.pingmonitor.app"
+  BUNDLE_ID: "com.hadm.pingmonitor"
 
 jobs:
   build-for-appstore:
