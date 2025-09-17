@@ -16,6 +16,14 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Set version
+      id: version
+      run: |
+        # Use commit short SHA as version for builds
+        VERSION=$(git rev-parse --short HEAD)
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Using version: $VERSION"
+
     - name: Build Universal Binary
       run: |
         swiftc PingMonitor.swift -o PingMonitor-arm64 -target arm64-apple-macos13.0 -Osize
@@ -43,9 +51,9 @@ jobs:
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-            <string>${{ github.event.inputs.version }}</string>
+            <string>${{ steps.version.outputs.VERSION }}</string>
             <key>CFBundleVersion</key>
-            <string>${{ github.event.inputs.version }}</string>
+            <string>${{ steps.version.outputs.VERSION }}</string>
             <key>LSMinimumSystemVersion</key>
             <string>13.0</string>
             <key>LSUIElement</key>
@@ -91,10 +99,10 @@ jobs:
         mkdir dmg_staging
         cp -R "$PRODUCT_NAME.app" dmg_staging/
         ln -s /Applications dmg_staging/Applications
-        hdiutil create -volname "$PRODUCT_NAME v${{ github.event.inputs.version }} (Unsigned)" \
+        hdiutil create -volname "$PRODUCT_NAME v${{ steps.version.outputs.VERSION }} (Unsigned)" \
           -srcfolder dmg_staging \
           -ov -format UDZO \
-          "$PRODUCT_NAME-${{ github.event.inputs.version }}-unsigned.dmg"
+          "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-unsigned.dmg"
         echo "✅ DMG created"
 
     - name: Create PKG
@@ -103,9 +111,9 @@ jobs:
         cp -R "$PRODUCT_NAME.app" pkg_staging/Applications/
         pkgbuild --root pkg_staging \
           --identifier "com.pingmonitor.app.installer" \
-          --version "${{ github.event.inputs.version }}" \
+          --version "${{ steps.version.outputs.VERSION }}" \
           --install-location "/" \
-          "$PRODUCT_NAME-${{ github.event.inputs.version }}-unsigned.pkg"
+          "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-unsigned.pkg"
         echo "✅ PKG created"
 
     - name: Create Local Signing Instructions
@@ -116,8 +124,8 @@ jobs:
         ## What's Included
         - \`$PRODUCT_NAME.app\` - Unsigned app bundle ready for signing
         - \`entitlements.plist\` - Entitlements file for sandboxed signing
-        - \`$PRODUCT_NAME-${{ github.event.inputs.version }}-unsigned.dmg\` - Unsigned DMG
-        - \`$PRODUCT_NAME-${{ github.event.inputs.version }}-unsigned.pkg\` - Unsigned PKG
+        - \`$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-unsigned.dmg\` - Unsigned DMG
+        - \`$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-unsigned.pkg\` - Unsigned PKG
 
         ## Sign the App Bundle
         \`\`\`bash
@@ -141,14 +149,14 @@ jobs:
         cp -R "$PRODUCT_NAME.app" pkg_staging/Applications/
         pkgbuild --root pkg_staging \\
           --identifier "com.pingmonitor.app.installer" \\
-          --version "${{ github.event.inputs.version }}" \\
+          --version "${{ steps.version.outputs.VERSION }}" \\
           --install-location "/" \\
           "unsigned.pkg"
 
         # Sign the PKG
         productsign --sign "Developer ID Installer: Keith Herrington (6R7S5GA944)" \\
           "unsigned.pkg" \\
-          "$PRODUCT_NAME-${{ github.event.inputs.version }}-signed.pkg"
+          "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.pkg"
         \`\`\`
 
         ## Create Signed DMG
@@ -158,33 +166,33 @@ jobs:
         mkdir dmg_staging
         cp -R "$PRODUCT_NAME.app" dmg_staging/
         ln -s /Applications dmg_staging/Applications
-        hdiutil create -volname "$PRODUCT_NAME v${{ github.event.inputs.version }}" \\
+        hdiutil create -volname "$PRODUCT_NAME v${{ steps.version.outputs.VERSION }}" \\
           -srcfolder dmg_staging \\
           -ov -format UDZO \\
-          "$PRODUCT_NAME-${{ github.event.inputs.version }}-signed.dmg"
+          "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.dmg"
         \`\`\`
 
         ## Notarize (Optional)
         \`\`\`bash
         # Submit for notarization
-        xcrun notarytool submit "$PRODUCT_NAME-${{ github.event.inputs.version }}-signed.dmg" \\
+        xcrun notarytool submit "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.dmg" \\
           --apple-id "your-apple-id@example.com" \\
           --password "your-app-specific-password" \\
           --team-id "6R7S5GA944" \\
           --wait
 
         # Staple notarization ticket
-        xcrun stapler staple "$PRODUCT_NAME-${{ github.event.inputs.version }}-signed.dmg"
+        xcrun stapler staple "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.dmg"
         \`\`\`
         EOF
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: PingMonitor-v${{ github.event.inputs.version }}-ReadyToSign
+        name: PingMonitor-v${{ steps.version.outputs.VERSION }}-ReadyToSign
         path: |
           PingMonitor.app
           entitlements.plist
-          PingMonitor-${{ github.event.inputs.version }}-unsigned.dmg
-          PingMonitor-${{ github.event.inputs.version }}-unsigned.pkg
+          PingMonitor-${{ steps.version.outputs.VERSION }}-unsigned.dmg
+          PingMonitor-${{ steps.version.outputs.VERSION }}-unsigned.pkg
           SIGNING_INSTRUCTIONS.md
