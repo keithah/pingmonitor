@@ -3227,12 +3227,7 @@ class MenuBarController: NSObject, ObservableObject, NSWindowDelegate {
 
 // MARK: - Main App Entry Point
 
-@main
-struct PingScopeApp {
-    static func main() {
-        let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
-        let controller = MenuBarController()
-        app.run()
-    }
-}
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+let _ = MenuBarController()
+app.run()
