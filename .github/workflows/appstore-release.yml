@@ -34,10 +34,10 @@ jobs:
         security set-keychain-settings -t 3600 -u build.keychain
 
         # Import Mac App Store certificates
-        echo "${{ secrets.MAC_APP_STORE_CERTIFICATE_P12 }}" | base64 -d > appstore_cert.p12
+        echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 -d > appstore_cert.p12
         security import appstore_cert.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -A
 
-        echo "${{ secrets.MAC_INSTALLER_CERTIFICATE_P12 }}" | base64 -d > installer_cert.p12
+        echo "${{ secrets.APPLE_INSTALLER_P12 }}" | base64 -d > installer_cert.p12
         security import installer_cert.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -A
 
         # Set key partition list
@@ -163,7 +163,7 @@ jobs:
           --file "$PRODUCT_NAME-${{ github.event.inputs.version }}-AppStore.pkg" \
           --type osx \
           --username "${{ secrets.APPLE_ID }}" \
-          --password "${{ secrets.APPLE_APP_PASSWORD }" \
+          --password "${{ secrets.APPLE_APP_PASSWORD }}" \
           --verbose
 
         echo "✅ Upload completed! Check App Store Connect for processing status."
