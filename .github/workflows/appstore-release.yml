@@ -9,7 +9,7 @@ on:
         default: '1.0.0'
 
 env:
-  PRODUCT_NAME: "PingMonitor"
+  PRODUCT_NAME: "PingScope - Stay Connected!"
   BUNDLE_ID: "com.hadm.pingmonitor"
 
 jobs:
