@@ -7,7 +7,9 @@ on:
     branches: [ main ]
 
 env:
-  PRODUCT_NAME: "PingMonitor"
+  PRODUCT_NAME: "PingScope"
+  PRODUCT_DISPLAY_NAME: "PingScope - Stay Connected!"
+  BUNDLE_ID: "com.hadm.pingmonitor"
 
 jobs:
   build:
@@ -26,16 +28,16 @@ jobs:
 
     - name: Build Universal Binary
       run: |
-        swiftc PingMonitor.swift -o PingMonitor-arm64 -target arm64-apple-macos13.0 -Osize
-        swiftc PingMonitor.swift -o PingMonitor-x86_64 -target x86_64-apple-macos13.0 -Osize
-        lipo -create -output PingMonitor PingMonitor-arm64 PingMonitor-x86_64
-        lipo -archs PingMonitor
+        swiftc PingMonitor/PingMonitor.swift -o PingScope-arm64 -target arm64-apple-macos13.0 -Osize
+        swiftc PingMonitor/PingMonitor.swift -o PingScope-x86_64 -target x86_64-apple-macos13.0 -Osize
+        lipo -create -output PingScope PingScope-arm64 PingScope-x86_64
+        lipo -archs PingScope
         echo "✅ Universal binary created"
 
     - name: Create App Bundle
       run: |
         mkdir -p "$PRODUCT_NAME.app/Contents/MacOS"
-        cp PingMonitor "$PRODUCT_NAME.app/Contents/MacOS/"
+        cp PingScope "$PRODUCT_NAME.app/Contents/MacOS/"
 
         cat > "$PRODUCT_NAME.app/Contents/Info.plist" << EOF
         <?xml version="1.0" encoding="UTF-8"?>
@@ -45,9 +47,9 @@ jobs:
             <key>CFBundleExecutable</key>
             <string>$PRODUCT_NAME</string>
             <key>CFBundleIdentifier</key>
-            <string>com.pingmonitor.app</string>
+            <string>$BUNDLE_ID</string>
             <key>CFBundleName</key>
-            <string>$PRODUCT_NAME</string>
+            <string>$PRODUCT_DISPLAY_NAME</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
@@ -96,6 +98,7 @@ jobs:
 
     - name: Create DMG
       run: |
+        rm -rf dmg_staging
         mkdir dmg_staging
         cp -R "$PRODUCT_NAME.app" dmg_staging/
         ln -s /Applications dmg_staging/Applications
@@ -107,6 +110,7 @@ jobs:
 
     - name: Create PKG
       run: |
+        rm -rf pkg_staging
         mkdir -p pkg_staging/Applications
         cp -R "$PRODUCT_NAME.app" pkg_staging/Applications/
         pkgbuild --root pkg_staging \

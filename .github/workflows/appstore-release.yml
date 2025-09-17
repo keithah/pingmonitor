@@ -74,11 +74,11 @@ jobs:
     - name: Build for App Store using Xcode
       run: |
         echo "🏗️ Building App Store version with Xcode..."
-        xcodebuild -project PingMonitor.xcodeproj \
-          -scheme PingMonitor \
+        xcodebuild -project $PRODUCT_NAME.xcodeproj \
+          -scheme $PRODUCT_NAME \
           -configuration Release \
           -destination "platform=macOS" \
-          -archivePath "PingMonitor.xcarchive" \
+          -archivePath "$PRODUCT_NAME.xcarchive" \
           archive \
           CODE_SIGN_IDENTITY="$APP_STORE_IDENTITY" \
           CODE_SIGN_STYLE=Manual \
@@ -119,7 +119,7 @@ jobs:
 
         # Export the archive
         xcodebuild -exportArchive \
-          -archivePath "PingMonitor.xcarchive" \
+          -archivePath "$PRODUCT_NAME.xcarchive" \
           -exportOptionsPlist ExportOptions.plist \
           -exportPath "AppStoreExport"
 
@@ -172,7 +172,7 @@ jobs:
     - name: Create submission notes
       run: |
         cat > AppStore_Submission_Notes.md << EOF
-        # App Store Submission for PingMonitor v${{ github.event.inputs.version }}
+        # App Store Submission for $PRODUCT_DISPLAY_NAME v${{ github.event.inputs.version }}
 
         ## 📋 Submission Checklist
 
@@ -198,7 +198,7 @@ jobs:
 
         ### 📱 App Store Connect Next Steps
         1. Go to [App Store Connect](https://appstoreconnect.apple.com)
-        2. Select your app (PingMonitor)
+        2. Select your app ($PRODUCT_DISPLAY_NAME)
         3. Create a new version (${{ github.event.inputs.version }})
         4. Upload screenshots and metadata
         5. Submit for App Store review
@@ -211,7 +211,7 @@ jobs:
         - Export functionality
 
         ### 📝 App Description Template
-        **PingMonitor** is a professional network monitoring tool for macOS that provides real-time connectivity monitoring from your menu bar.
+        **$PRODUCT_DISPLAY_NAME** is a professional network monitoring tool for macOS that provides real-time connectivity monitoring from your menu bar.
 
         **Features:**
         - Real-time ping monitoring of multiple hosts
@@ -238,11 +238,11 @@ jobs:
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: PingMonitor-v${{ github.event.inputs.version }}-AppStore
+        name: ${{ env.PRODUCT_NAME }}-v${{ github.event.inputs.version }}-AppStore
         path: |
-          PingMonitor-${{ github.event.inputs.version }}-AppStore.pkg
+          ${{ env.PRODUCT_NAME }}-${{ github.event.inputs.version }}-AppStore.pkg
           AppStore_Submission_Notes.md
-          PingMonitor.xcarchive
+          ${{ env.PRODUCT_NAME }}.xcarchive
           AppStoreExport/
 
     - name: Clean up keychain
@@ -255,7 +255,7 @@ jobs:
       run: |
         echo "🎉 App Store build completed successfully!"
         echo ""
-        echo "📦 **Package**: PingMonitor-${{ github.event.inputs.version }}-AppStore.pkg"
+        echo "📦 **Package**: $PRODUCT_NAME-${{ github.event.inputs.version }}-AppStore.pkg"
         echo "📋 **Next Steps**: Check App Store Connect and upload metadata"
         echo "🔗 **App Store Connect**: https://appstoreconnect.apple.com"
         echo ""

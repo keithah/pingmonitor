@@ -12,8 +12,9 @@ on:
         default: '0.1.0'
 
 env:
-  PRODUCT_NAME: "PingMonitor"
-  BUNDLE_ID: "com.pingmonitor.app"
+  PRODUCT_NAME: "PingScope"
+  PRODUCT_DISPLAY_NAME: "PingScope - Stay Connected!"
+  BUNDLE_ID: "com.hadm.pingmonitor"
 
 jobs:
   build-and-release:
@@ -83,25 +84,25 @@ jobs:
     - name: Build Universal Binary
       run: |
         # Build for both architectures
-        swiftc PingMonitor.swift -o PingMonitor-arm64 \
+        swiftc PingMonitor/PingMonitor.swift -o PingScope-arm64 \
           -target arm64-apple-macos13.0 \
           -Osize
 
-        swiftc PingMonitor.swift -o PingMonitor-x86_64 \
+        swiftc PingMonitor/PingMonitor.swift -o PingScope-x86_64 \
           -target x86_64-apple-macos13.0 \
           -Osize
 
         # Create universal binary
-        lipo -create -output PingMonitor PingMonitor-arm64 PingMonitor-x86_64
+        lipo -create -output PingScope PingScope-arm64 PingScope-x86_64
 
         # Verify universal binary
-        lipo -archs PingMonitor
+        lipo -archs PingScope
 
     - name: Create App Bundle
       run: |
         mkdir -p "$PRODUCT_NAME.app/Contents/MacOS"
         mkdir -p "$PRODUCT_NAME.app/Contents/Resources"
-        cp PingMonitor "$PRODUCT_NAME.app/Contents/MacOS/"
+        cp PingScope "$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME"
 
         # Create Info.plist with proper icon reference
         cat > "$PRODUCT_NAME.app/Contents/Info.plist" << EOF
@@ -114,13 +115,13 @@ jobs:
             <key>CFBundleExecutable</key>
             <string>$PRODUCT_NAME</string>
             <key>CFBundleIconFile</key>
-            <string>PingMonitor</string>
+            <string>$PRODUCT_NAME</string>
             <key>CFBundleIdentifier</key>
             <string>$BUNDLE_ID</string>
             <key>CFBundleInfoDictionaryVersion</key>
             <string>6.0</string>
             <key>CFBundleName</key>
-            <string>$PRODUCT_NAME</string>
+            <string>$PRODUCT_DISPLAY_NAME</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
@@ -149,9 +150,9 @@ jobs:
 
         # Copy icon if available
         if [ -f "PingMonitor.icns" ]; then
-          cp PingMonitor.icns "$PRODUCT_NAME.app/Contents/Resources/"
+          cp PingMonitor.icns "$PRODUCT_NAME.app/Contents/Resources/$PRODUCT_NAME.icns"
         elif [ -f "AppIcon.icns" ]; then
-          cp AppIcon.icns "$PRODUCT_NAME.app/Contents/Resources/PingMonitor.icns"
+          cp AppIcon.icns "$PRODUCT_NAME.app/Contents/Resources/$PRODUCT_NAME.icns"
         fi
 
         chmod +x "$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME"
