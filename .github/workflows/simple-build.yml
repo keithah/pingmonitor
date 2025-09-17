@@ -1,12 +1,10 @@
-name: Simple Build for Local Signing
+name: Simple Build
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version number'
-        required: true
-        default: '0.1.0'
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 env:
   PRODUCT_NAME: "PingMonitor"

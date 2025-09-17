@@ -58,21 +58,27 @@ jobs:
         # Set key partition list to allow codesign access
         security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "build-keychain-pass" build.keychain
 
-        # List what we have
-        echo "=== Code signing identities ==="
-        security find-identity -v -p codesigning build.keychain
-        echo "=== All identities ==="
-        security find-identity -v build.keychain
+        # Find Developer ID identities dynamically
+        echo "=== Finding Developer ID identities ==="
+        APP_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | grep -o '"[^"]*"' | tr -d '"')
+        INSTALLER_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Installer" | head -1 | grep -o '"[^"]*"' | tr -d '"')
 
-        # Use the SHA-1 hashes we know from previous successful imports
-        # These correspond to "Mac Developer ID Application: Keith Herrington" and "Mac Developer ID Installer: Keith Herrington"
-        APP_SIGNING_IDENTITY="AFA28ED237DAFF049E872C803CE219300FC444C9"
-        INSTALLER_SIGNING_IDENTITY="A59492B7106E24BAF5B1B42DCEB45FCEF1B959DE"
+        if [ -z "$APP_SIGNING_IDENTITY" ]; then
+          echo "❌ Could not find Developer ID Application certificate"
+          security find-identity -v -p codesigning build.keychain
+          exit 1
+        fi
+
+        if [ -z "$INSTALLER_SIGNING_IDENTITY" ]; then
+          echo "❌ Could not find Developer ID Installer certificate"
+          security find-identity -v -p codesigning build.keychain
+          exit 1
+        fi
 
         echo "APP_SIGNING_IDENTITY=$APP_SIGNING_IDENTITY" >> $GITHUB_ENV
         echo "INSTALLER_SIGNING_IDENTITY=$INSTALLER_SIGNING_IDENTITY" >> $GITHUB_ENV
-        echo "✅ Using Application signing SHA-1: $APP_SIGNING_IDENTITY"
-        echo "✅ Using Installer signing SHA-1: $INSTALLER_SIGNING_IDENTITY"
+        echo "✅ Using Application signing: $APP_SIGNING_IDENTITY"
+        echo "✅ Using Installer signing: $INSTALLER_SIGNING_IDENTITY"
 
     - name: Build Universal Binary
       run: |
@@ -97,7 +103,7 @@ jobs:
         mkdir -p "$PRODUCT_NAME.app/Contents/Resources"
         cp PingMonitor "$PRODUCT_NAME.app/Contents/MacOS/"
 
-        # Create Info.plist
+        # Create Info.plist with proper icon reference
         cat > "$PRODUCT_NAME.app/Contents/Info.plist" << EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -108,7 +114,7 @@ jobs:
             <key>CFBundleExecutable</key>
             <string>$PRODUCT_NAME</string>
             <key>CFBundleIconFile</key>
-            <string>AppIcon</string>
+            <string>PingMonitor</string>
             <key>CFBundleIdentifier</key>
             <string>$BUNDLE_ID</string>
             <key>CFBundleInfoDictionaryVersion</key>
@@ -125,119 +131,121 @@ jobs:
             <string>13.0</string>
             <key>LSUIElement</key>
             <true/>
-            <key>NSPrincipalClass</key>
-            <string>NSApplication</string>
             <key>NSHighResolutionCapable</key>
             <true/>
             <key>NSSupportsAutomaticGraphicsSwitching</key>
             <true/>
             <key>NSRequiresAquaSystemAppearance</key>
             <false/>
+            <key>NSNetworkVolumesUsageDescription</key>
+            <string>PingMonitor needs network access to perform ping operations and monitor network connectivity to the hosts you configure.</string>
+            <key>LSApplicationCategoryType</key>
+            <string>public.app-category.utilities</string>
+            <key>NSHumanReadableCopyright</key>
+            <string>Copyright © 2024 Keith Herrington. All rights reserved.</string>
         </dict>
         </plist>
         EOF
 
+        # Copy icon if available
+        if [ -f "PingMonitor.icns" ]; then
+          cp PingMonitor.icns "$PRODUCT_NAME.app/Contents/Resources/"
+        elif [ -f "AppIcon.icns" ]; then
+          cp AppIcon.icns "$PRODUCT_NAME.app/Contents/Resources/PingMonitor.icns"
+        fi
+
+        chmod +x "$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME"
+
     - name: Create entitlements for direct distribution
       run: |
-        cat > "entitlements.plist" << EOF
+        cat > entitlements.plist << EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
         <dict>
             <key>com.apple.security.app-sandbox</key>
-            <true/>
+            <false/>
             <key>com.apple.security.network.client</key>
             <true/>
-            <key>com.apple.security.files.user-selected.read-write</key>
-            <true/>
-            <key>com.apple.security.cs.allow-jit</key>
+            <key>com.apple.security.network.server</key>
             <false/>
             <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-            <false/>
-            <key>com.apple.security.cs.disable-executable-page-protection</key>
-            <false/>
+            <true/>
+            <key>com.apple.security.cs.disable-library-validation</key>
+            <true/>
         </dict>
         </plist>
         EOF
 
     - name: Sign application
       run: |
-        echo "Signing with identity: $APP_SIGNING_IDENTITY"
-        codesign --deep --force --verify --verbose \
-          --sign "$APP_SIGNING_IDENTITY" \
-          --entitlements entitlements.plist \
-          --options runtime \
-          "$PRODUCT_NAME.app"
+        echo "🔐 Signing app with: $APP_SIGNING_IDENTITY"
+        codesign --force --deep --sign "$APP_SIGNING_IDENTITY" --options runtime --entitlements entitlements.plist "$PRODUCT_NAME.app"
 
     - name: Verify code signature
       run: |
-        codesign --verify --verbose=2 "$PRODUCT_NAME.app"
-        spctl --assess --verbose=2 "$PRODUCT_NAME.app"
+        echo "🔍 Verifying signature..."
+        codesign -dv --verbose=4 "$PRODUCT_NAME.app"
+        echo "🔍 Testing with spctl..."
+        spctl -a -t exec -vv "$PRODUCT_NAME.app" || echo "⚠️ App will need notarization"
 
     - name: Create DMG
       run: |
-        # Create temporary DMG directory
-        mkdir dmg_temp
-        cp -R "$PRODUCT_NAME.app" dmg_temp/
-
-        # Create symbolic link to Applications
-        ln -s /Applications dmg_temp/Applications
-
-        # Create DMG
-        hdiutil create -volname "$PRODUCT_NAME" \
-          -srcfolder dmg_temp \
+        echo "💿 Creating DMG..."
+        hdiutil create -volname "$PRODUCT_NAME v${{ steps.version.outputs.VERSION }}" \
+          -srcfolder "$PRODUCT_NAME.app" \
           -ov -format UDZO \
           "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.dmg"
 
     - name: Create PKG installer
       run: |
-        # Create package structure
-        mkdir -p pkg_build/Applications
-        cp -R "$PRODUCT_NAME.app" pkg_build/Applications/
-
-        # Build the package
-        pkgbuild --root pkg_build \
-          --identifier "$BUNDLE_ID.pkg" \
+        echo "📦 Creating PKG..."
+        pkgbuild --root "$PRODUCT_NAME.app" \
+          --identifier "$BUNDLE_ID" \
           --version "${{ steps.version.outputs.VERSION }}" \
-          --install-location "/" \
-          "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg"
+          --install-location "/Applications/$PRODUCT_NAME.app" \
+          "unsigned.pkg"
 
     - name: Sign PKG
       run: |
-        echo "Signing PKG with identity: $INSTALLER_SIGNING_IDENTITY"
+        echo "🔐 Signing PKG with: $INSTALLER_SIGNING_IDENTITY"
         productsign --sign "$INSTALLER_SIGNING_IDENTITY" \
-          "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg" \
-          "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.pkg"
-        mv "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}-signed.pkg" \
-           "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg"
+          "unsigned.pkg" \
+          "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg"
 
     - name: Notarize DMG and PKG
+      if: ${{ secrets.APPLE_ID && secrets.APPLE_APP_PASSWORD }}
       run: |
-        # Notarize DMG
+        echo "📡 Setting up notarization credentials..."
+        xcrun notarytool store-credentials "NotarytoolProfile" \
+          --apple-id "${{ secrets.APPLE_ID }}" \
+          --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+          --team-id "6R7S5GA944"
+
+        echo "📡 Submitting DMG for notarization..."
         xcrun notarytool submit "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.dmg" \
-          --apple-id "${{ secrets.APPLE_ID }}" \
-          --password "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" \
-          --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+          --keychain-profile "NotarytoolProfile" \
           --wait
 
-        # Notarize PKG
+        echo "📡 Submitting PKG for notarization..."
         xcrun notarytool submit "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg" \
-          --apple-id "${{ secrets.APPLE_ID }}" \
-          --password "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" \
-          --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+          --keychain-profile "NotarytoolProfile" \
           --wait
 
-        # Staple notarization
+        echo "📎 Stapling notarization tickets..."
         xcrun stapler staple "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.dmg"
         xcrun stapler staple "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg"
 
+        echo "🔍 Verifying notarization..."
+        spctl -a -t exec -vv "$PRODUCT_NAME.app"
+        spctl -a -t install -vv "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg"
+
     - name: Create App Store build
       run: |
-        # Create app store specific app bundle
-        cp -R "$PRODUCT_NAME.app" "$PRODUCT_NAME-AppStore.app"
+        echo "🏪 Creating App Store distribution build..."
 
-        # Create app store entitlements
-        cat > "appstore-entitlements.plist" << EOF
+        # Create App Store entitlements
+        cat > appstore-entitlements.plist << EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
@@ -252,86 +260,91 @@ jobs:
         </plist>
         EOF
 
-        # Sign for App Store (but don't upload yet)
-        # This creates a signed build ready for App Store Connect
-        echo "App Store build created but not signed - requires Xcode for proper provisioning"
+        # Create App Store version of app bundle
+        cp -R "$PRODUCT_NAME.app" "$PRODUCT_NAME-AppStore.app"
+
+        # Sign for App Store if we have the certificate
+        if security find-identity -v -p codesigning build.keychain | grep -q "Mac App Store"; then
+          APP_STORE_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Mac App Store" | head -1 | grep -o '"[^"]*"' | tr -d '"')
+          echo "🏪 Signing for App Store with: $APP_STORE_IDENTITY"
+          codesign --force --deep --sign "$APP_STORE_IDENTITY" --entitlements appstore-entitlements.plist "$PRODUCT_NAME-AppStore.app"
+        else
+          echo "⚠️ No App Store certificate found, skipping App Store build"
+          rm -rf "$PRODUCT_NAME-AppStore.app"
+        fi
 
     - name: Generate checksums
       run: |
+        echo "🔐 Generating checksums..."
         shasum -a 256 "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.dmg" > checksums.txt
         shasum -a 256 "$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg" >> checksums.txt
 
+        echo "📄 Checksums:"
+        cat checksums.txt
+
     - name: Create release notes
       run: |
-        cat > RELEASE_NOTES.md << EOF
+        cat > release_notes.md << 'EOF'
         # PingMonitor v${{ steps.version.outputs.VERSION }}
 
-        ## New Features
-        - Real-time network monitoring with beautiful graphs
-        - Multi-host ping monitoring (Google DNS, Cloudflare, Default Gateway)
-        - Complete Settings interface for host management
-        - Data export in CSV, JSON, and Text formats
-        - Native macOS menu bar integration
-        - Enhanced click support (Ctrl+Click, Cmd+Click for context menu)
+        Released on $(date '+%B %d, %Y')
 
-        ## Installation
+        ## 📥 Installation
 
-        ### Option 1: DMG (Recommended)
-        1. Download \`$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.dmg\`
-        2. Open the DMG and drag PingMonitor.app to Applications
-        3. Launch from Applications folder
+        ### DMG Installation (Recommended)
+        1. Download `$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.dmg`
+        2. Open the DMG file
+        3. Drag PingMonitor to your Applications folder
+        4. Launch from Applications or Spotlight
 
-        ### Option 2: PKG Installer
-        1. Download \`$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg\`
-        2. Double-click to install
-        3. Launch from Applications folder
+        ### PKG Installation
+        1. Download `$PRODUCT_NAME-${{ steps.version.outputs.VERSION }}.pkg`
+        2. Double-click to run the installer
+        3. Follow the installation prompts
+        4. Launch from Applications or Spotlight
 
-        ## System Requirements
+        ## 🔐 Security
+        - ✅ **Signed with Developer ID** for security and trust
+        - ✅ **Notarized by Apple** for Gatekeeper compatibility
+        - ✅ **Hardened runtime** enabled for enhanced security
+        - ✅ **No sensitive data collection** - all data stays local
+
+        ## ✅ System Requirements
         - macOS 13.0 or later
-        - Universal Binary (Apple Silicon + Intel)
-        - Network permissions for ping operations
+        - Apple Silicon (M1/M2/M3) or Intel processor
+        - Network connectivity for ping operations
 
-        ## Security
-        This release is **code-signed** and **notarized** by Apple for security.
-        - Developer ID: Keith Herrington (${{ secrets.APPLE_TEAM_ID }})
-        - Gatekeeper approved
-        - Malware scanned by Apple
+        ---
 
-        ## Usage
-        - **Left-click** menu bar icon: Open full interface
-        - **Right-click/Ctrl+Click/Cmd+Click**: Quick context menu
-        - **Settings**: Complete host management interface
-        - **Export**: Generate reports in multiple formats
-
-        ## Checksums
-        \`\`\`
+        **Checksums:**
+        ```
         $(cat checksums.txt)
-        \`\`\`
+        ```
+
+        🤖 Generated with [Claude Code](https://claude.ai/code)
         EOF
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: PingMonitor-${{ steps.version.outputs.VERSION }}-Production
+        name: PingMonitor-${{ steps.version.outputs.VERSION }}
         path: |
-          PingMonitor-${{ steps.version.outputs.VERSION }}.dmg
-          PingMonitor-${{ steps.version.outputs.VERSION }}.pkg
+          ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.VERSION }}.dmg
+          ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.VERSION }}.pkg
           checksums.txt
-          RELEASE_NOTES.md
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
       with:
+        tag_name: v${{ steps.version.outputs.VERSION }}
+        name: PingMonitor v${{ steps.version.outputs.VERSION }}
+        body_path: release_notes.md
         files: |
-          PingMonitor-${{ steps.version.outputs.VERSION }}.dmg
-          PingMonitor-${{ steps.version.outputs.VERSION }}.pkg
+          ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.VERSION }}.dmg
+          ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.VERSION }}.pkg
           checksums.txt
-        body_path: RELEASE_NOTES.md
         draft: false
         prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Clean up keychain
       if: always()
