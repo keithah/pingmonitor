@@ -9,7 +9,8 @@ on:
         default: '1.0.0'
 
 env:
-  PRODUCT_NAME: "PingScope - Stay Connected!"
+  PRODUCT_NAME: "PingScope"
+  PRODUCT_DISPLAY_NAME: "PingScope - Stay Connected!"
   BUNDLE_ID: "com.hadm.pingmonitor"
 
 jobs:
@@ -133,7 +134,7 @@ jobs:
           # Create PKG for App Store submission
           productbuild --component "AppStoreExport/$PRODUCT_NAME.app" /Applications \
             --sign "$INSTALLER_IDENTITY" \
-            "$PRODUCT_NAME-${{ github.event.inputs.version }}-AppStore.pkg"
+            "${PRODUCT_NAME}-${{ github.event.inputs.version }}-AppStore.pkg"
 
           echo "✅ Created App Store package"
         else
@@ -148,7 +149,7 @@ jobs:
 
         # Validate the package
         xcrun altool --validate-app \
-          --file "$PRODUCT_NAME-${{ github.event.inputs.version }}-AppStore.pkg" \
+          --file "${PRODUCT_NAME}-${{ github.event.inputs.version }}-AppStore.pkg" \
           --type osx \
           --username "${{ secrets.APPLE_ID }}" \
           --password "${{ secrets.APPLE_APP_PASSWORD }}" || echo "⚠️ Validation warnings (may be normal)"
@@ -160,7 +161,7 @@ jobs:
 
         # Upload to App Store Connect
         xcrun altool --upload-app \
-          --file "$PRODUCT_NAME-${{ github.event.inputs.version }}-AppStore.pkg" \
+          --file "${PRODUCT_NAME}-${{ github.event.inputs.version }}-AppStore.pkg" \
           --type osx \
           --username "${{ secrets.APPLE_ID }}" \
           --password "${{ secrets.APPLE_APP_PASSWORD }}" \
