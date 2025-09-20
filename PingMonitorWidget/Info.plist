@@ -5,21 +5,21 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Ping Monitor Widget</string>
+    <string>PingScope Widget</string>
     <key>CFBundleExecutable</key>
     <string>PingMonitorWidget</string>
     <key>CFBundleIdentifier</key>
-    <string>com.pingmonitor.app.widget</string>
+    <string>com.hadm.pingmonitor.widget</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>PingMonitorWidget</string>
+    <string>PingScope Widget</string>
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.1</string>
+    <string>1.0.0</string>
     <key>CFBundleVersion</key>
-    <string>0.1.1</string>
+    <string>1.0.0</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionPointIdentifier</key>

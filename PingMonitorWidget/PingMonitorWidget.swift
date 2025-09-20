@@ -70,7 +70,7 @@ struct PingProvider: TimelineProvider {
 
     private func loadPingData() -> [PingWidgetData] {
         // Try to load data from App Group shared container
-        guard let sharedURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.pingmonitor.shared"),
+        guard let sharedURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.hadm.pingmonitor.shared"),
               let data = try? Data(contentsOf: sharedURL.appendingPathComponent("pingdata.json")),
               let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return defaultPingData()

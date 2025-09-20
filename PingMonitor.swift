@@ -313,7 +313,7 @@ class PingService: ObservableObject {
         }
 
         // Save to shared container for widget
-        guard let sharedURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.pingmonitor.shared") else {
+        guard let sharedURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.hadm.pingmonitor.shared") else {
             print("Failed to get shared container URL")
             return
         }

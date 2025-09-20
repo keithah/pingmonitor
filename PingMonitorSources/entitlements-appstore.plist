@@ -14,13 +14,10 @@
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
 
-    <!-- App Store specific: NO JIT, NO unsigned executable memory -->
-    <!-- These are automatically false in App Store builds, but explicit is better -->
-    <key>com.apple.security.cs.allow-jit</key>
-    <false/>
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <false/>
-    <key>com.apple.security.cs.disable-executable-page-protection</key>
-    <false/>
+    <!-- App Groups for widget data sharing -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.hadm.pingmonitor.shared</string>
+    </array>
 </dict>
 </plist>

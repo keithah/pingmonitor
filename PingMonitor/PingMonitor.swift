@@ -311,7 +311,7 @@ class PingService: ObservableObject {
         }
 
         // Save to shared container for widget
-        guard let sharedURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.pingmonitor.shared") else {
+        guard let sharedURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.hadm.pingmonitor.shared") else {
             print("Failed to get shared container URL")
             return
         }
@@ -3227,7 +3227,12 @@ class MenuBarController: NSObject, ObservableObject, NSWindowDelegate {
 
 // MARK: - Main App Entry Point
 
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-let _ = MenuBarController()
-app.run()
+@main
+struct PingMonitorApp {
+    static func main() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        let _ = MenuBarController()
+        app.run()
+    }
+}
