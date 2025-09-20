@@ -1,0 +1,49 @@
+name: Trigger Xcode Cloud Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+
+jobs:
+  trigger-xcode-cloud:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create or update version tag
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION_TAG="${{ github.event.inputs.version }}"
+
+          # Delete tag if it exists
+          git tag -d "$VERSION_TAG" 2>/dev/null || true
+          git push origin ":refs/tags/$VERSION_TAG" 2>/dev/null || true
+
+          # Create new tag
+          git tag "$VERSION_TAG"
+          git push origin "$VERSION_TAG"
+
+          echo "✅ Created/updated tag: $VERSION_TAG"
+          echo "🚀 This should trigger Xcode Cloud build automatically"
+        else
+          echo "ℹ️  Push to main - check Xcode Cloud for automatic builds"
+        fi
+
+    - name: Instructions
+      run: |
+        echo "📱 Next steps:"
+        echo "1. Go to App Store Connect > Your App > Xcode Cloud"
+        echo "2. Check if build started automatically"
+        echo "3. If not, create a workflow that triggers on:"
+        echo "   - Push to main branch"
+        echo "   - Tags matching 'v*'"
+        echo ""
+        echo "🔗 App Store Connect: https://appstoreconnect.apple.com"
