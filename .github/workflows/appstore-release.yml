@@ -7,10 +7,12 @@ on:
         description: 'Version number (e.g., 1.0.0)'
         required: true
         default: '1.0.0'
+  push:
+    branches: [ main ]
 
 env:
-  PRODUCT_NAME: "PingScope"
-  PRODUCT_DISPLAY_NAME: "PingScope - Stay Connected!"
+  PRODUCT_NAME: "PingMonitor"
+  PRODUCT_DISPLAY_NAME: "PingScope"
   BUNDLE_ID: "com.hadm.pingmonitor"
 
 jobs:
@@ -67,9 +69,16 @@ jobs:
 
     - name: Update version in Info.plist
       run: |
-        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ github.event.inputs.version }}" Info.plist
-        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.event.inputs.version }}" Info.plist
-        echo "✅ Updated version to ${{ github.event.inputs.version }}"
+        VERSION="${{ github.event.inputs.version || '1.0.0' }}"
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" PingMonitor/Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" PingMonitor/Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" PingMonitorSources/Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" PingMonitorSources/Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" PingMonitorWidget/Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" PingMonitorWidget/Info.plist
+        echo "✅ Updated version to $VERSION"
 
     - name: Build for App Store using Xcode
       run: |
@@ -132,9 +141,10 @@ jobs:
           echo "✅ Found exported app bundle"
 
           # Create PKG for App Store submission
+          VERSION="${{ github.event.inputs.version || '1.0.0' }}"
           productbuild --component "AppStoreExport/$PRODUCT_NAME.app" /Applications \
             --sign "$INSTALLER_IDENTITY" \
-            "${PRODUCT_NAME}-${{ github.event.inputs.version }}-AppStore.pkg"
+            "${PRODUCT_NAME}-${VERSION}-AppStore.pkg"
 
           echo "✅ Created App Store package"
         else
@@ -143,36 +153,29 @@ jobs:
           exit 1
         fi
 
-    - name: Validate App Store package
-      run: |
-        echo "🔍 Validating App Store package..."
-
-        # Validate the package
-        xcrun altool --validate-app \
-          --file "${PRODUCT_NAME}-${{ github.event.inputs.version }}-AppStore.pkg" \
-          --type osx \
-          --username "${{ secrets.APPLE_ID }}" \
-          --password "${{ secrets.APPLE_APP_PASSWORD }}" || echo "⚠️ Validation warnings (may be normal)"
-
-    - name: Upload to App Store Connect (if credentials available)
+    - name: Validate and Upload to App Store Connect
       if: ${{ secrets.APPLE_ID && secrets.APPLE_APP_PASSWORD }}
       run: |
-        echo "☁️ Uploading to App Store Connect..."
+        VERSION="${{ github.event.inputs.version || '1.0.0' }}"
+        PACKAGE_FILE="${PRODUCT_NAME}-${VERSION}-AppStore.pkg"
 
-        # Upload to App Store Connect
-        xcrun altool --upload-app \
-          --file "${PRODUCT_NAME}-${{ github.event.inputs.version }}-AppStore.pkg" \
-          --type osx \
-          --username "${{ secrets.APPLE_ID }}" \
+        echo "🔍 Validating and uploading $PACKAGE_FILE to App Store Connect..."
+
+        # Use notarytool for validation and upload
+        xcrun notarytool submit "$PACKAGE_FILE" \
+          --apple-id "${{ secrets.APPLE_ID }}" \
           --password "${{ secrets.APPLE_APP_PASSWORD }}" \
-          --verbose
+          --team-id "6R7S5GA944" \
+          --wait \
+          --timeout 10m
 
         echo "✅ Upload completed! Check App Store Connect for processing status."
 
     - name: Create submission notes
       run: |
+        VERSION="${{ github.event.inputs.version || '1.0.0' }}"
         cat > AppStore_Submission_Notes.md << EOF
-        # App Store Submission for $PRODUCT_DISPLAY_NAME v${{ github.event.inputs.version }}
+        # App Store Submission for $PRODUCT_DISPLAY_NAME v${VERSION}
 
         ## 📋 Submission Checklist
 
@@ -199,7 +202,7 @@ jobs:
         ### 📱 App Store Connect Next Steps
         1. Go to [App Store Connect](https://appstoreconnect.apple.com)
         2. Select your app ($PRODUCT_DISPLAY_NAME)
-        3. Create a new version (${{ github.event.inputs.version }})
+        3. Create a new version (${VERSION})
         4. Upload screenshots and metadata
         5. Submit for App Store review
 
@@ -231,16 +234,16 @@ jobs:
 
         ---
         **Build Date**: $(date '+%B %d, %Y at %H:%M %Z')
-        **Version**: ${{ github.event.inputs.version }}
+        **Version**: ${VERSION}
         **Bundle ID**: $BUNDLE_ID
         EOF
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.PRODUCT_NAME }}-v${{ github.event.inputs.version }}-AppStore
+        name: ${{ env.PRODUCT_NAME }}-v${{ github.event.inputs.version || '1.0.0' }}-AppStore
         path: |
-          ${{ env.PRODUCT_NAME }}-${{ github.event.inputs.version }}-AppStore.pkg
+          ${{ env.PRODUCT_NAME }}-${{ github.event.inputs.version || '1.0.0' }}-AppStore.pkg
           AppStore_Submission_Notes.md
           ${{ env.PRODUCT_NAME }}.xcarchive
           AppStoreExport/
@@ -253,9 +256,10 @@ jobs:
 
     - name: Summary
       run: |
+        VERSION="${{ github.event.inputs.version || '1.0.0' }}"
         echo "🎉 App Store build completed successfully!"
         echo ""
-        echo "📦 **Package**: $PRODUCT_NAME-${{ github.event.inputs.version }}-AppStore.pkg"
+        echo "📦 **Package**: $PRODUCT_NAME-${VERSION}-AppStore.pkg"
         echo "📋 **Next Steps**: Check App Store Connect and upload metadata"
         echo "🔗 **App Store Connect**: https://appstoreconnect.apple.com"
         echo ""
