@@ -13,6 +13,7 @@ on:
 
 jobs:
   trigger-xcode-cloud:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code

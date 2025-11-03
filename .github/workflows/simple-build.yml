@@ -13,6 +13,7 @@ env:
 
 jobs:
   build:
+    timeout-minutes: 8
     runs-on: macos-latest
     steps:
     - name: Checkout
